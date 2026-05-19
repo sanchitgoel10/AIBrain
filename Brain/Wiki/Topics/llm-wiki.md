@@ -7,7 +7,8 @@ created: 2026-05-19
 updated: 2026-05-19
 sources:
   - "Raw/Sources/how-to-build-llm-wiki-in-obsidian.md"
-source_count: 1
+  - "Raw/Sources/why-llm-wiki-future-of-knowledge-for-agentic-ai-humans.md"
+source_count: 2
 aliases:
   - "LLM Wiki"
   - "AI Brain"
@@ -20,6 +21,8 @@ aliases:
 An LLM Wiki is a structured memory layer for humans and agentic AI. It separates captured source material from compiled knowledge so agents can query reusable notes before reading broad raw context.
 
 This topic connects the source transcript [[how-to-build-llm-wiki-in-obsidian|How To Build LLM Wiki In Obsidian]] with the concepts [[raw-to-wiki-compilation|Raw To Wiki Compilation]] and [[schema-as-agent-contract|Schema As Agent Contract]].
+
+The theory source [[why-llm-wiki-future-of-knowledge-for-agentic-ai-humans|Why LLM Wiki: Future Of Knowledge For Agentic AI And Humans]] explains why the LLM Wiki matters: it gives AI tools a shared [[knowledge-graph|Knowledge Graph]] rather than leaving memory trapped in separate tool silos.
 
 ## Core Layers
 
@@ -34,3 +37,4 @@ The transcript frames the LLM Wiki as a separate brain that AI agents can build 
 ## Source Notes
 
 - Source: [[how-to-build-llm-wiki-in-obsidian|How To Build LLM Wiki In Obsidian]]
+- Source: [[why-llm-wiki-future-of-knowledge-for-agentic-ai-humans|Why LLM Wiki: Future Of Knowledge For Agentic AI And Humans]]
