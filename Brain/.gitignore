@@ -5,4 +5,6 @@
 .obsidian/logs/
 Raw/Files/*
 !Raw/Files/.gitkeep
+Raw/Sources/*
+!Raw/Sources/.gitkeep
 Drafts/
