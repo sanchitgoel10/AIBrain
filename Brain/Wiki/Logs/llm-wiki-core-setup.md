@@ -18,7 +18,8 @@ aliases: []
 
 The first ingest created the core AI Brain knowledge layer from the supplied LLM Wiki setup transcript. The vault now has a Raw transcript source and compiled notes covering the LLM Wiki topic, source compilation, schema rules, and the local AI Brain project.
 
+Connected notes: [[how-to-build-llm-wiki-in-obsidian|How To Build LLM Wiki In Obsidian]], [[llm-wiki|LLM Wiki]], [[raw-to-wiki-compilation|Raw To Wiki Compilation]], [[schema-as-agent-contract|Schema As Agent Contract]], and [[ai-brain-obsidian-vault|AI Brain Obsidian Vault]].
+
 ## Source Notes
 
-- Source: `Raw/Sources/how-to-build-llm-wiki-in-obsidian.md`
-
+- Source: [[how-to-build-llm-wiki-in-obsidian|How To Build LLM Wiki In Obsidian]]

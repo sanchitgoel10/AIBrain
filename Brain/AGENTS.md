@@ -16,9 +16,10 @@ This vault is an LLM Wiki. Treat it as a layered knowledge system, not as a gene
 3. Open Raw sources only when a compiled note is insufficient, when source-level verification is needed, or when ingesting new material.
 4. Write reusable knowledge only under `Wiki/`.
 5. Keep every compiled note linked to one or more existing files under `Raw/Sources/`.
-6. Keep `source_count` equal to the number of entries in `sources`.
-7. Run `python3 scripts/wiki_tool.py build`, `python3 scripts/wiki_tool.py lint`, and `python3 scripts/wiki_tool.py source-lint` before meaningful commits.
-8. Do not invent citations, sources, or unsupported claims.
+6. Add Obsidian `[[wikilinks]]` between Raw sources and compiled Wiki notes so graph connections are visible.
+7. Keep `source_count` equal to the number of entries in `sources`.
+8. Run `python3 scripts/wiki_tool.py build`, `python3 scripts/wiki_tool.py lint`, and `python3 scripts/wiki_tool.py source-lint` before meaningful commits.
+9. Do not invent citations, sources, or unsupported claims.
 
 ## Commit Gate
 

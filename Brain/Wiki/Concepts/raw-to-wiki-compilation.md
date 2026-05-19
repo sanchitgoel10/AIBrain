@@ -20,6 +20,8 @@ aliases:
 
 Raw to Wiki compilation is the process of turning preserved source material into concise, linked, reusable Wiki notes.
 
+It is a core workflow inside [[llm-wiki|LLM Wiki]] and is demonstrated by the source transcript [[how-to-build-llm-wiki-in-obsidian|How To Build LLM Wiki In Obsidian]].
+
 ## Key Points
 
 - Raw notes should remain unchanged as evidence.
@@ -29,5 +31,4 @@ Raw to Wiki compilation is the process of turning preserved source material into
 
 ## Source Notes
 
-- Source: `Raw/Sources/how-to-build-llm-wiki-in-obsidian.md`
-
+- Source: [[how-to-build-llm-wiki-in-obsidian|How To Build LLM Wiki In Obsidian]]

@@ -19,6 +19,8 @@ aliases:
 
 Build the `Brain/` Obsidian vault into an LLM Wiki that agents can maintain through Raw sources, compiled Wiki notes, schema rules, deterministic tooling, and Git checkpoints.
 
+This project implements [[llm-wiki|LLM Wiki]] using [[schema-as-agent-contract|Schema As Agent Contract]] and [[raw-to-wiki-compilation|Raw To Wiki Compilation]].
+
 ## Decisions
 
 - Keep the LLM Wiki inside the existing `Brain/` Obsidian vault.
@@ -34,5 +36,4 @@ Build the `Brain/` Obsidian vault into an LLM Wiki that agents can maintain thro
 
 ## Source Notes
 
-- Source: `Raw/Sources/how-to-build-llm-wiki-in-obsidian.md`
-
+- Source: [[how-to-build-llm-wiki-in-obsidian|How To Build LLM Wiki In Obsidian]]

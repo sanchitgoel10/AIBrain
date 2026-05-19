@@ -20,6 +20,8 @@ aliases:
 
 The schema is the contract between the user and future agents. It describes where knowledge belongs, how notes should be structured, and which checks must pass before changes are trusted.
 
+This contract guides [[raw-to-wiki-compilation|Raw To Wiki Compilation]] inside the broader [[llm-wiki|LLM Wiki]].
+
 ## Key Points
 
 - Agent rules prevent Raw sources from being overwritten.
@@ -29,5 +31,4 @@ The schema is the contract between the user and future agents. It describes wher
 
 ## Source Notes
 
-- Source: `Raw/Sources/how-to-build-llm-wiki-in-obsidian.md`
-
+- Source: [[how-to-build-llm-wiki-in-obsidian|How To Build LLM Wiki In Obsidian]]

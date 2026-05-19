@@ -19,6 +19,8 @@ aliases:
 
 An LLM Wiki is a structured memory layer for humans and agentic AI. It separates captured source material from compiled knowledge so agents can query reusable notes before reading broad raw context.
 
+This topic connects the source transcript [[how-to-build-llm-wiki-in-obsidian|How To Build LLM Wiki In Obsidian]] with the concepts [[raw-to-wiki-compilation|Raw To Wiki Compilation]] and [[schema-as-agent-contract|Schema As Agent Contract]].
+
 ## Core Layers
 
 - Raw sources preserve original material.
@@ -31,5 +33,4 @@ The transcript frames the LLM Wiki as a separate brain that AI agents can build 
 
 ## Source Notes
 
-- Source: `Raw/Sources/how-to-build-llm-wiki-in-obsidian.md`
-
+- Source: [[how-to-build-llm-wiki-in-obsidian|How To Build LLM Wiki In Obsidian]]
