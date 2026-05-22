@@ -34,6 +34,20 @@ class CaptureError(RuntimeError):
     pass
 
 
+def fetch_text(url: str) -> str:
+    request = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36"
+            )
+        },
+    )
+    with urllib.request.urlopen(request, timeout=20) as response:
+        return response.read().decode("utf-8", errors="replace")
+
+
 def run_osascript(script: str) -> str:
     result = subprocess.run(
         ["osascript"],
@@ -70,6 +84,39 @@ end tell
         return json.loads(raw)
     except json.JSONDecodeError as exc:
         raise CaptureError(f"Could not parse browser capture result: {exc}") from exc
+
+
+def active_url_via_clipboard() -> str:
+    script = r'''
+set previousClipboard to ""
+try
+  set previousClipboard to the clipboard as text
+end try
+tell application "System Events"
+  keystroke "l" using command down
+  delay 0.08
+  keystroke "c" using command down
+  delay 0.08
+end tell
+set copiedUrl to the clipboard as text
+try
+  set the clipboard to previousClipboard
+end try
+return copiedUrl
+'''
+    url = run_osascript(script).strip()
+    if not re.match(r"^https?://", url):
+        raise CaptureError("Could not read the active page URL from Dia.")
+    return url
+
+
+def active_window_title() -> str:
+    try:
+        return run_osascript(
+            'tell application "System Events" to get name of front window of first application process whose frontmost is true'
+        )
+    except CaptureError:
+        return ""
 
 
 def slugify(value: str) -> str:
@@ -127,6 +174,54 @@ def extract_youtube_id(url: str) -> str:
     return params.get("v", [""])[0]
 
 
+def youtube_time_from_url(url: str) -> float:
+    parsed = urllib.parse.urlparse(url)
+    params = urllib.parse.parse_qs(parsed.query)
+    raw = params.get("t", ["0"])[0]
+    match = re.match(r"(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s?)?$", raw)
+    if match and raw:
+        hours = int(match.group(1) or 0)
+        minutes = int(match.group(2) or 0)
+        seconds = int(match.group(3) or 0)
+        return float(hours * 3600 + minutes * 60 + seconds)
+    try:
+        return float(raw)
+    except ValueError:
+        return 0.0
+
+
+def extract_json_object(text: str, marker: str) -> dict:
+    start = text.find(marker)
+    if start == -1:
+        raise CaptureError(f"Could not find {marker} in page source.")
+    brace_start = text.find("{", start)
+    if brace_start == -1:
+        raise CaptureError(f"Could not find JSON object for {marker}.")
+    depth = 0
+    in_string = False
+    escape = False
+    for index in range(brace_start, len(text)):
+        char = text[index]
+        if escape:
+            escape = False
+            continue
+        if char == "\\":
+            escape = True
+            continue
+        if char == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return json.loads(text[brace_start : index + 1])
+    raise CaptureError(f"Could not parse JSON object for {marker}.")
+
+
 def fetch_transcript(caption_tracks: list[dict]) -> str:
     if not caption_tracks:
         raise CaptureError("No YouTube transcript/caption track found for this video.")
@@ -153,6 +248,78 @@ def fetch_transcript(caption_tracks: list[dict]) -> str:
     if not lines:
         raise CaptureError("Transcript was found but did not contain usable text.")
     return "\n".join(lines)
+
+
+def youtube_data_from_url(url: str) -> dict:
+    page = fetch_text(url)
+    response = extract_json_object(page, "ytInitialPlayerResponse")
+    details = response.get("videoDetails", {})
+    tracks = (
+        response.get("captions", {})
+        .get("playerCaptionsTracklistRenderer", {})
+        .get("captionTracks", [])
+    )
+    return {
+        "kind": "youtube",
+        "url": url,
+        "title": details.get("title") or active_window_title().replace(" - YouTube", ""),
+        "author": details.get("author", ""),
+        "videoId": details.get("videoId") or extract_youtube_id(url),
+        "currentTime": youtube_time_from_url(url),
+        "duration": float(details.get("lengthSeconds") or 0),
+        "captionTracks": [
+            {
+                "baseUrl": track.get("baseUrl", ""),
+                "name": track.get("name", {}).get("simpleText", ""),
+                "languageCode": track.get("languageCode", ""),
+                "kind": track.get("kind", ""),
+            }
+            for track in tracks
+        ],
+    }
+
+
+def text_from_html(page: str) -> str:
+    page = re.sub(r"(?is)<script.*?</script>", " ", page)
+    page = re.sub(r"(?is)<style.*?</style>", " ", page)
+    page = re.sub(r"(?is)<(nav|header|footer|aside).*?</\1>", " ", page)
+    page = re.sub(r"(?i)<(p|br|h[1-6]|li|blockquote|div|section|article|main)\b[^>]*>", "\n", page)
+    page = re.sub(r"(?s)<[^>]+>", " ", page)
+    page = html.unescape(page)
+    page = re.sub(r"[ \t]+", " ", page)
+    page = re.sub(r"\n\s*\n\s*\n+", "\n\n", page)
+    return page.strip()
+
+
+def meta_content(page: str, *names: str) -> str:
+    for name in names:
+        patterns = [
+            rf'<meta[^>]+(?:name|property)=["\']{re.escape(name)}["\'][^>]+content=["\']([^"\']+)["\']',
+            rf'<meta[^>]+content=["\']([^"\']+)["\'][^>]+(?:name|property)=["\']{re.escape(name)}["\']',
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, page, re.I)
+            if match:
+                return html.unescape(match.group(1)).strip()
+    return ""
+
+
+def article_data_from_url(url: str) -> dict:
+    page = fetch_text(url)
+    text = text_from_html(page)
+    title = meta_content(page, "og:title", "twitter:title")
+    if not title:
+        match = re.search(r"(?is)<title[^>]*>(.*?)</title>", page)
+        title = html.unescape(re.sub(r"\s+", " ", match.group(1))).strip() if match else active_window_title()
+    return {
+        "kind": "article",
+        "url": url,
+        "title": title or "Article",
+        "author": meta_content(page, "author", "article:author"),
+        "date": meta_content(page, "article:published_time", "date"),
+        "excerpt": meta_content(page, "description", "og:description", "twitter:description") or text[:700],
+        "text": text,
+    }
 
 
 def format_seconds(raw: str) -> str:
@@ -228,8 +395,9 @@ ARTICLE_JS = r"""
 """
 
 
-def capture_youtube(browser: str) -> Path:
-    data = active_tab_json(browser, YOUTUBE_JS)
+def capture_youtube(browser: str | None = None, data: dict | None = None, url: str | None = None) -> Path:
+    if data is None:
+        data = youtube_data_from_url(url) if url else active_tab_json(browser or "", YOUTUBE_JS)
     transcript = fetch_transcript(data.get("captionTracks", []))
     title = data.get("title") or "YouTube Video"
     url = data.get("url") or ""
@@ -263,8 +431,9 @@ Channel: {author}
     )
 
 
-def capture_article(browser: str) -> Path:
-    data = active_tab_json(browser, ARTICLE_JS)
+def capture_article(browser: str | None = None, data: dict | None = None, url: str | None = None) -> Path:
+    if data is None:
+        data = article_data_from_url(url) if url else active_tab_json(browser or "", ARTICLE_JS)
     title = data.get("title") or "Article"
     text = data.get("text") or ""
     if len(text.strip()) < 300:
@@ -319,7 +488,13 @@ def capture_current_page() -> Path:
     browser = frontmost_app()
     if browser not in SUPPORTED_BROWSERS:
         raise CaptureError(f"Frontmost app is {browser}. Bring a Chromium browser tab forward first.")
-    probe = active_tab_json(browser, 'JSON.stringify({url: location.href, title: document.title})')
+    try:
+        probe = active_tab_json(browser, 'JSON.stringify({url: location.href, title: document.title})')
+    except CaptureError:
+        url = active_url_via_clipboard()
+        if "youtube.com/watch" in url or "youtu.be/" in url:
+            return capture_youtube(url=url)
+        return capture_article(url=url)
     url = probe.get("url", "")
     if "youtube.com/watch" in url or "youtu.be/" in url:
         return capture_youtube(browser)
