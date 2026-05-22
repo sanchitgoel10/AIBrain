@@ -3,6 +3,15 @@
 import AppKit
 import Foundation
 
+struct CaptureCandidate: Decodable {
+    let url: String
+    let title: String
+    let browser: String
+    let source: String
+
+    static let empty = CaptureCandidate(url: "", title: "", browser: "", source: "")
+}
+
 final class CaptureButtonView: NSView {
     var onCapture: (() -> Void)?
     private var isHovering = false
@@ -140,7 +149,7 @@ final class CaptureDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func capture() {
-        guard let url = askForURL(defaultURL: candidateURL()) else {
+        guard let url = askForURL(candidate: candidatePage()) else {
             return
         }
 
@@ -172,18 +181,11 @@ final class CaptureDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    func candidateURL() -> String {
-        if let rawClipboard = NSPasteboard.general.string(forType: .string) {
-            let clipboard = rawClipboard.trimmingCharacters(in: .whitespacesAndNewlines)
-            if isCaptureURL(clipboard) {
-                return clipboard
-            }
-        }
-
+    func candidatePage() -> CaptureCandidate {
         let task = Process()
         task.currentDirectoryURL = root
         task.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
-        task.arguments = ["scripts/capture_current_page.py", "--candidate-url"]
+        task.arguments = ["scripts/capture_current_page.py", "--candidate-json"]
 
         let output = Pipe()
         task.standardOutput = output
@@ -193,25 +195,48 @@ final class CaptureDelegate: NSObject, NSApplicationDelegate {
             try task.run()
             task.waitUntilExit()
         } catch {
-            return ""
+            return .empty
         }
 
-        let text = String(data: output.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        let candidate = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        return isCaptureURL(candidate) ? candidate : ""
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        guard let candidate = try? JSONDecoder().decode(CaptureCandidate.self, from: data),
+              isCaptureURL(candidate.url) else {
+            return .empty
+        }
+        return candidate
     }
 
-    func askForURL(defaultURL: String) -> String? {
+    func askForURL(candidate: CaptureCandidate) -> String? {
         NSApp.activate(ignoringOtherApps: true)
 
-        let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 520, height: 28))
-        input.stringValue = defaultURL
+        let stack = NSStackView(frame: NSRect(x: 0, y: 0, width: 560, height: 118))
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 8
+
+        let titleLabel = wrappingLabel(
+            candidate.title.isEmpty ? "Title: unknown" : "Title: \(candidate.title)",
+            width: 560,
+            bold: true
+        )
+        let sourceText = candidate.source == "history" && !candidate.browser.isEmpty
+            ? "Source: \(candidate.browser) recent history"
+            : (candidate.source.isEmpty ? "Source: pasted or typed URL" : "Source: \(candidate.source)")
+        let sourceLabel = wrappingLabel(sourceText, width: 560, bold: false)
+
+        let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 560, height: 28))
+        input.stringValue = candidate.url
         input.placeholderString = "https://www.youtube.com/watch?v=... or https://example.com/article"
+        input.lineBreakMode = .byTruncatingMiddle
+
+        stack.addArrangedSubview(titleLabel)
+        stack.addArrangedSubview(sourceLabel)
+        stack.addArrangedSubview(input)
 
         let alert = NSAlert()
-        alert.messageText = "Capture URL"
-        alert.informativeText = "Confirm the YouTube or article URL to save into AI Brain."
-        alert.accessoryView = input
+        alert.messageText = "Capture this page?"
+        alert.informativeText = "Confirm both the title and exact URL before saving."
+        alert.accessoryView = stack
         alert.addButton(withTitle: "Capture")
         alert.addButton(withTitle: "Cancel")
         alert.window.initialFirstResponder = input
@@ -228,6 +253,16 @@ final class CaptureDelegate: NSObject, NSApplicationDelegate {
 
         show("Capture error", "Paste a valid http or https URL.")
         return nil
+    }
+
+    func wrappingLabel(_ text: String, width: CGFloat, bold: Bool) -> NSTextField {
+        let label = NSTextField(labelWithString: text)
+        label.frame = NSRect(x: 0, y: 0, width: width, height: 20)
+        label.maximumNumberOfLines = 2
+        label.lineBreakMode = .byTruncatingTail
+        label.font = bold ? NSFont.boldSystemFont(ofSize: 13) : NSFont.systemFont(ofSize: 12)
+        label.textColor = bold ? .labelColor : .secondaryLabelColor
+        return label
     }
 
     func isCaptureURL(_ value: String) -> Bool {

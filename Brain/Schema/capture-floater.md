@@ -14,7 +14,7 @@ The capture floater is a lightweight Mac tool for saving a YouTube video or arti
 
 Clicking the floating button:
 
-1. Opens a confirmation box for the URL to capture. The box is prefilled from the clipboard when it contains a URL, otherwise from the newest local Chromium/Dia history URL.
+1. Opens a confirmation box for the page to capture. The box shows the detected title, source, and exact editable URL.
 2. Captures only the confirmed URL, so stale browser history cannot silently save the wrong page.
 3. If the page is YouTube, checks Transcribe's cache and then calls its agent API when needed.
 4. Saves title, URL, channel, timestamp from the URL when present, duration, summary, Transcribe permalink, and timestamped transcript.
@@ -37,6 +37,8 @@ USETRANSCRIBE_BASE_URL=https://www.usetranscribe.io
 ```
 
 Transcribe's published agent API does not require an API key today. It is rate-limited by IP/session, so the script checks the cache before triggering a new transcription.
+
+YouTube captures require an actual transcript. If Transcribe and the local YouTube captions fallback both fail, the script exits with an error and does not save a metadata-only source note.
 
 ## Run
 

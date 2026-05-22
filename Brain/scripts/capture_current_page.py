@@ -175,14 +175,24 @@ def latest_history_entry_any_browser() -> dict:
     return sorted(entries, key=lambda item: item["last_visit_time"], reverse=True)[0]
 
 
-def candidate_url() -> str:
+def candidate_page() -> dict:
     clipboard_url = clipboard_capture_url()
     if clipboard_url:
-        return clipboard_url
+        return {"url": clipboard_url, "title": "Clipboard URL", "browser": "", "source": "clipboard"}
     try:
-        return latest_history_entry_any_browser()["url"]
+        entry = latest_history_entry_any_browser()
+        return {
+            "url": entry.get("url", ""),
+            "title": entry.get("title", ""),
+            "browser": entry.get("browser", ""),
+            "source": "history",
+        }
     except CaptureError:
-        return ""
+        return {"url": "", "title": "", "browser": "", "source": ""}
+
+
+def candidate_url() -> str:
+    return candidate_page()["url"]
 
 
 def active_url_fallback(browser: str) -> str:
@@ -703,6 +713,11 @@ def capture_youtube(browser: str | None = None, data: dict | None = None, url: s
         transcript, has_transcript = data["transcript"], True
     else:
         transcript, has_transcript = transcript_or_warning(data.get("captionTracks", []))
+    if not has_transcript:
+        warning = data.get("captureWarning", "").strip()
+        reason = transcript.strip()
+        details = "\n\n".join(item for item in [warning, reason] if item)
+        raise CaptureError(f"YouTube transcript was not captured, so no source note was saved.\n\n{details}")
     title = data.get("title") or "YouTube Video"
     url = data.get("url") or ""
     video_id = data.get("videoId") or extract_youtube_id(url)
@@ -827,8 +842,12 @@ def main() -> int:
     parser.add_argument("--skip-maintenance", action="store_true")
     parser.add_argument("--url", help="Capture a specific URL instead of reading the active browser.")
     parser.add_argument("--candidate-url", action="store_true", help="Print a best-effort URL candidate and exit.")
+    parser.add_argument("--candidate-json", action="store_true", help="Print a best-effort URL candidate with title and exit.")
     parser.add_argument("--from-history", action="store_true", help="Capture the newest local Chromium history URL.")
     args = parser.parse_args()
+    if args.candidate_json:
+        print(json.dumps(candidate_page()))
+        return 0
     if args.candidate_url:
         print(candidate_url())
         return 0
