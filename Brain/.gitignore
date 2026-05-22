@@ -1,4 +1,6 @@
 .DS_Store
+.env
+.env.local
 .obsidian/workspace*.json
 .obsidian/plugins/
 .obsidian/cache/

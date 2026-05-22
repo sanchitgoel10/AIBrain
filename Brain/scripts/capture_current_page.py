@@ -22,6 +22,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 RAW = ROOT / "Raw" / "Sources"
 WIKI_TOOL = ROOT / "scripts" / "wiki_tool.py"
+USETRANSCRIBE_BASE_URL = "https://www.usetranscribe.io"
+CAPTURE_USER_AGENT = "AIBrainCapture/0.1 (+local Obsidian vault)"
 SUPPORTED_BROWSERS = {
     "Google Chrome",
     "Google Chrome Canary",
@@ -76,12 +78,6 @@ def run_osascript(script: str) -> str:
     return result.stdout.strip()
 
 
-def frontmost_app() -> str:
-    return run_osascript(
-        'tell application "System Events" to get name of first application process whose frontmost is true'
-    )
-
-
 def active_tab_json(browser: str, js: str) -> dict:
     quoted_js = json.dumps(js)
     quoted_browser = json.dumps(browser)
@@ -129,6 +125,13 @@ def is_capture_url(url: str) -> bool:
 
 
 def latest_history_url(browser: str) -> str:
+    entry = latest_history_entry(browser)
+    if not entry:
+        raise CaptureError(f"Could not find a recent captureable URL in {browser} history.")
+    return entry["url"]
+
+
+def latest_history_entry(browser: str) -> dict | None:
     for raw_path in BROWSER_HISTORY_PATHS.get(browser, []):
         history_path = Path(raw_path).expanduser()
         if not history_path.exists():
@@ -138,17 +141,24 @@ def latest_history_url(browser: str) -> str:
             with sqlite3.connect(tmp.name) as db:
                 rows = db.execute(
                     """
-                    SELECT url, title
+                    SELECT url, title, last_visit_time
                     FROM urls
                     WHERE url LIKE 'http%'
                     ORDER BY last_visit_time DESC
                     LIMIT 50
                     """
                 ).fetchall()
-        for url, _title in rows:
+        for url, title, last_visit_time in rows:
             if is_capture_url(url):
-                return url
-    raise CaptureError(f"Could not find a recent captureable URL in {browser} history.")
+                return {"browser": browser, "url": url, "title": title or "", "last_visit_time": last_visit_time}
+    return None
+
+
+def latest_history_entry_any_browser() -> dict:
+    entries = [entry for browser in BROWSER_HISTORY_PATHS for entry in [latest_history_entry(browser)] if entry]
+    if not entries:
+        raise CaptureError("Could not find a recent captureable URL in local Chromium browser history.")
+    return sorted(entries, key=lambda item: item["last_visit_time"], reverse=True)[0]
 
 
 def active_url_fallback(browser: str) -> str:
@@ -165,6 +175,20 @@ def active_window_title() -> str:
         )
     except CaptureError:
         return ""
+
+
+def load_dotenv() -> None:
+    env_path = ROOT / ".env"
+    if not env_path.exists():
+        return
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        os.environ.setdefault(key, value)
 
 
 def slugify(value: str) -> str:
@@ -296,6 +320,161 @@ def fetch_transcript(caption_tracks: list[dict]) -> str:
     if not lines:
         raise CaptureError("Transcript was found but did not contain usable text.")
     return "\n".join(lines)
+
+
+def usetranscribe_base_url() -> str:
+    return os.environ.get("USETRANSCRIBE_BASE_URL", USETRANSCRIBE_BASE_URL).rstrip("/")
+
+
+def request_json(url: str, *, timeout: int = 60) -> dict:
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "application/json",
+            "User-Agent": CAPTURE_USER_AGENT,
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            raw = response.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise CaptureError(f"Transcribe API error {exc.code}: {detail}") from exc
+    return json.loads(raw) if raw.strip() else {}
+
+
+def absolutize_transcribe_permalink(permalink: str) -> str:
+    if permalink.startswith("http"):
+        return permalink
+    return f"{usetranscribe_base_url()}{permalink}"
+
+
+def transcript_from_segments(segments: list[dict]) -> str:
+    lines = []
+    for segment in segments:
+        start = segment.get("start", segment.get("start_seconds", 0))
+        speaker = str(segment.get("speaker", "")).strip()
+        text = re.sub(r"\s+", " ", str(segment.get("text", ""))).strip()
+        if not text:
+            continue
+        prefix = f"{speaker}: " if speaker else ""
+        lines.append(f"- [{format_seconds(str(start))}] {prefix}{text}")
+    return "\n".join(lines)
+
+
+def normalize_usetranscribe_cached(data: dict, original_url: str) -> dict:
+    transcript = data.get("transcript") or {}
+    segments = transcript.get("segments") or []
+    return {
+        "kind": "youtube",
+        "url": data.get("source_url") or original_url,
+        "title": data.get("title") or "YouTube Video",
+        "author": data.get("creator") or "",
+        "videoId": data.get("external_id") or extract_youtube_id(original_url),
+        "currentTime": youtube_time_from_url(original_url),
+        "duration": float(data.get("duration_seconds") or 0),
+        "transcript": transcript_from_segments(segments),
+        "summary": data.get("summary") or "",
+        "language": transcript.get("language") or "",
+        "transcribePermalink": data.get("permalink") or "",
+        "transcribeSource": data.get("pipeline_version") or "cached",
+        "captionTracks": [],
+    }
+
+
+def normalize_usetranscribe_done(data: dict, original_url: str) -> dict:
+    metadata = data.get("metadata") or {}
+    permalink = absolutize_transcribe_permalink(str(data.get("permalink") or ""))
+    return {
+        "kind": "youtube",
+        "url": metadata.get("source_url") or original_url,
+        "title": metadata.get("title") or "YouTube Video",
+        "author": metadata.get("creator") or metadata.get("channel") or "",
+        "videoId": metadata.get("external_id") or extract_youtube_id(original_url),
+        "currentTime": youtube_time_from_url(original_url),
+        "duration": float(metadata.get("duration_seconds") or 0),
+        "transcript": transcript_from_segments(data.get("segments") or []),
+        "summary": data.get("summary_md") or "",
+        "language": data.get("language") or "",
+        "transcribePermalink": permalink,
+        "transcribeSource": data.get("source") or "",
+        "captionTracks": [],
+    }
+
+
+def fetch_usetranscribe_cached(video_id: str, original_url: str) -> dict | None:
+    query = urllib.parse.urlencode({"platform": "youtube", "id": video_id})
+    check = request_json(f"{usetranscribe_base_url()}/api/check?{query}")
+    if not check.get("cached"):
+        return None
+    permalink = absolutize_transcribe_permalink(str(check.get("permalink") or ""))
+    separator = "&" if "?" in permalink else "?"
+    data = request_json(f"{permalink}{separator}format=json")
+    return normalize_usetranscribe_cached(data, original_url)
+
+
+def fetch_usetranscribe_sse(url: str) -> dict:
+    query = urllib.parse.urlencode({"url": url, "summarize": "1"})
+    request = urllib.request.Request(
+        f"{usetranscribe_base_url()}/transcribe?{query}",
+        headers={"Accept": "text/event-stream", "User-Agent": CAPTURE_USER_AGENT},
+    )
+    event = ""
+    data_lines: list[str] = []
+
+    def consume_event() -> dict | None:
+        nonlocal event, data_lines
+        if not event:
+            data_lines = []
+            return None
+        payload = "\n".join(data_lines).strip()
+        current_event = event
+        event = ""
+        data_lines = []
+        if not payload:
+            return None
+        try:
+            data = json.loads(payload)
+        except json.JSONDecodeError as exc:
+            raise CaptureError(f"Could not parse Transcribe {current_event} event: {exc}") from exc
+        if current_event == "done":
+            return data
+        if current_event == "error":
+            code = data.get("code", "error")
+            message = data.get("message", "Transcribe failed.")
+            raise CaptureError(f"Transcribe API error {code}: {message}")
+        return None
+
+    try:
+        with urllib.request.urlopen(request, timeout=660) as response:
+            for raw_line in response:
+                line = raw_line.decode("utf-8", errors="replace").rstrip("\n")
+                if not line.strip():
+                    result = consume_event()
+                    if result is not None:
+                        return result
+                    continue
+                if line.startswith("event:"):
+                    event = line.split(":", 1)[1].strip()
+                elif line.startswith("data:"):
+                    data_lines.append(line.split(":", 1)[1].strip())
+            result = consume_event()
+            if result is not None:
+                return result
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise CaptureError(f"Transcribe API error {exc.code}: {detail}") from exc
+    raise CaptureError("Transcribe API stream ended before returning a transcript.")
+
+
+def usetranscribe_youtube_data(url: str) -> dict:
+    video_id = extract_youtube_id(url)
+    if not video_id:
+        raise CaptureError("Could not extract a YouTube video id from the URL.")
+    cached = fetch_usetranscribe_cached(video_id, url)
+    if cached:
+        return cached
+    return normalize_usetranscribe_done(fetch_usetranscribe_sse(url), url)
 
 
 def transcript_or_warning(caption_tracks: list[dict]) -> tuple[str, bool]:
@@ -487,12 +666,19 @@ ARTICLE_JS = r"""
 def capture_youtube(browser: str | None = None, data: dict | None = None, url: str | None = None) -> Path:
     if data is None:
         try:
-            data = youtube_data_from_url(url) if url else active_tab_json(browser or "", YOUTUBE_JS)
+            data = usetranscribe_youtube_data(url) if url else active_tab_json(browser or "", YOUTUBE_JS)
         except (CaptureError, urllib.error.URLError, ET.ParseError, json.JSONDecodeError) as exc:
             if not url:
                 raise
-            data = minimal_youtube_data(url, exc)
-    transcript, has_transcript = transcript_or_warning(data.get("captionTracks", []))
+            try:
+                data = youtube_data_from_url(url)
+                data["captureWarning"] = f"Primary Transcribe API failed; used YouTube captions fallback. Reason: {exc}"
+            except (CaptureError, urllib.error.URLError, ET.ParseError, json.JSONDecodeError):
+                data = minimal_youtube_data(url, exc)
+    if data.get("transcript"):
+        transcript, has_transcript = data["transcript"], True
+    else:
+        transcript, has_transcript = transcript_or_warning(data.get("captionTracks", []))
     title = data.get("title") or "YouTube Video"
     url = data.get("url") or ""
     video_id = data.get("videoId") or extract_youtube_id(url)
@@ -512,7 +698,17 @@ Duration: {duration}
 
 Channel: {author}
 
+Transcribe permalink: {data.get("transcribePermalink", "")}
+
+Transcribe source: {data.get("transcribeSource", "")}
+
+Language: {data.get("language", "")}
+
 Capture warning: {data.get("captureWarning", "")}
+
+## Summary
+
+{data.get("summary", "").strip()}
 
 ## Transcript
 
@@ -589,20 +785,8 @@ def run_ingest_command(source_path: Path) -> None:
 
 
 def capture_current_page() -> Path:
-    browser = frontmost_app()
-    if browser not in SUPPORTED_BROWSERS:
-        raise CaptureError(f"Frontmost app is {browser}. Bring a Chromium browser tab forward first.")
-    try:
-        probe = active_tab_json(browser, 'JSON.stringify({url: location.href, title: document.title})')
-    except CaptureError:
-        url = active_url_fallback(browser)
-        if "youtube.com/watch" in url or "youtu.be/" in url:
-            return capture_youtube(url=url)
-        return capture_article(url=url)
-    url = probe.get("url", "")
-    if "youtube.com/watch" in url or "youtu.be/" in url:
-        return capture_youtube(browser)
-    return capture_article(browser)
+    entry = latest_history_entry_any_browser()
+    return capture_url(entry["url"])
 
 
 def capture_url(url: str) -> Path:
@@ -614,6 +798,7 @@ def capture_url(url: str) -> Path:
 
 
 def main() -> int:
+    load_dotenv()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--skip-maintenance", action="store_true")
     parser.add_argument("--url", help="Capture a specific URL instead of reading the active browser.")
