@@ -1,5 +1,7 @@
 # Capture Floater
 
+Status: legacy. Prefer `Schema/browser-extension-capture.md` for Dia and Chromium browsers.
+
 The capture floater is a lightweight Mac tool for saving a YouTube video or article URL into the AI Brain.
 
 ## Scope
