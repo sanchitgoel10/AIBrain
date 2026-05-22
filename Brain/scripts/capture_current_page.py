@@ -26,6 +26,7 @@ SUPPORTED_BROWSERS = {
     "Brave Browser",
     "Microsoft Edge",
     "Arc",
+    "Dia",
 }
 
 
