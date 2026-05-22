@@ -3,6 +3,7 @@
 .obsidian/plugins/
 .obsidian/cache/
 .obsidian/logs/
+__pycache__/
 Raw/Files/*
 !Raw/Files/.gitkeep
 Raw/Sources/*
