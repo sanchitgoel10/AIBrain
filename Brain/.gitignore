@@ -4,6 +4,7 @@
 .obsidian/cache/
 .obsidian/logs/
 __pycache__/
+Schema/source-manifest.jsonl
 Raw/Files/*
 !Raw/Files/.gitkeep
 Raw/Sources/*

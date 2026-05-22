@@ -297,7 +297,7 @@ def cmd_source_lint(_args) -> int:
             errors.append(f"{rel(path)}: tags must include source")
         if fm.get("Processed") is True and not coverage.get(rel(path)):
             errors.append(f"{rel(path)}: processed source has no Wiki coverage")
-    if not MANIFEST.exists():
+    if source_paths() and not MANIFEST.exists():
         errors.append("Schema/source-manifest.jsonl is missing; run source-scan --update")
     return fail(errors, "source lint passed")
 

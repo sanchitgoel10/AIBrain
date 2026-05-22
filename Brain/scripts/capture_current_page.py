@@ -9,8 +9,11 @@ import html
 import json
 import os
 import re
+import shutil
+import sqlite3
 import subprocess
 import sys
+import tempfile
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -27,6 +30,18 @@ SUPPORTED_BROWSERS = {
     "Microsoft Edge",
     "Arc",
     "Dia",
+}
+BROWSER_HISTORY_PATHS = {
+    "Dia": [
+        "~/Library/Application Support/Dia/User Data/Default/History",
+        "~/Library/Application Support/Comet/Default/History",
+    ],
+    "Google Chrome": ["~/Library/Application Support/Google/Chrome/Default/History"],
+    "Google Chrome Canary": ["~/Library/Application Support/Google/Chrome Canary/Default/History"],
+    "Chromium": ["~/Library/Application Support/Chromium/Default/History"],
+    "Brave Browser": ["~/Library/Application Support/BraveSoftware/Brave-Browser/Default/History"],
+    "Microsoft Edge": ["~/Library/Application Support/Microsoft Edge/Default/History"],
+    "Arc": ["~/Library/Application Support/Arc/User Data/Default/History"],
 }
 
 
@@ -100,9 +115,47 @@ end tell
     if result.returncode != 0:
         raise CaptureError(result.stderr.strip() or "Could not read the clipboard text.")
     url = result.stdout.strip()
-    if not re.match(r"^https?://", url):
-        raise CaptureError("Could not read the active page URL from Dia.")
+    if not is_capture_url(url):
+        raise CaptureError("Clipboard did not contain a captureable URL.")
     return url
+
+
+def is_capture_url(url: str) -> bool:
+    if not re.match(r"^https?://", url or ""):
+        return False
+    parsed = urllib.parse.urlparse(url)
+    blocked_prefixes = ("chrome.", "newtab.", "dia.")
+    return not any(parsed.netloc.startswith(prefix) for prefix in blocked_prefixes)
+
+
+def latest_history_url(browser: str) -> str:
+    for raw_path in BROWSER_HISTORY_PATHS.get(browser, []):
+        history_path = Path(raw_path).expanduser()
+        if not history_path.exists():
+            continue
+        with tempfile.NamedTemporaryFile(prefix="aibrain-history-", suffix=".sqlite") as tmp:
+            shutil.copy2(history_path, tmp.name)
+            with sqlite3.connect(tmp.name) as db:
+                rows = db.execute(
+                    """
+                    SELECT url, title
+                    FROM urls
+                    WHERE url LIKE 'http%'
+                    ORDER BY last_visit_time DESC
+                    LIMIT 50
+                    """
+                ).fetchall()
+        for url, _title in rows:
+            if is_capture_url(url):
+                return url
+    raise CaptureError(f"Could not find a recent captureable URL in {browser} history.")
+
+
+def active_url_fallback(browser: str) -> str:
+    try:
+        return active_url_via_clipboard()
+    except CaptureError:
+        return latest_history_url(browser)
 
 
 def active_window_title() -> str:
@@ -245,6 +298,13 @@ def fetch_transcript(caption_tracks: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def transcript_or_warning(caption_tracks: list[dict]) -> tuple[str, bool]:
+    try:
+        return fetch_transcript(caption_tracks), True
+    except (CaptureError, urllib.error.URLError, ET.ParseError) as exc:
+        return f"Transcript could not be captured automatically.\n\nReason: {exc}", False
+
+
 def youtube_data_from_url(url: str) -> dict:
     page = fetch_text(url)
     response = extract_json_object(page, "ytInitialPlayerResponse")
@@ -314,6 +374,40 @@ def article_data_from_url(url: str) -> dict:
         "date": meta_content(page, "article:published_time", "date"),
         "excerpt": meta_content(page, "description", "og:description", "twitter:description") or text[:700],
         "text": text,
+    }
+
+
+def minimal_youtube_data(url: str, reason: Exception | str) -> dict:
+    video_id = extract_youtube_id(url)
+    title = active_window_title().replace(" - YouTube", "").strip() or f"YouTube Video {video_id}".strip()
+    return {
+        "kind": "youtube",
+        "url": url,
+        "title": title,
+        "author": "",
+        "videoId": video_id,
+        "currentTime": youtube_time_from_url(url),
+        "duration": 0,
+        "captionTracks": [],
+        "captureWarning": str(reason),
+    }
+
+
+def minimal_article_data(url: str, reason: Exception | str) -> dict:
+    title = active_window_title().strip() or urllib.parse.urlparse(url).netloc or "Article"
+    warning = (
+        "Full article text could not be captured automatically.\n\n"
+        f"Reason: {reason}\n\n"
+        "The URL was saved for follow-up."
+    )
+    return {
+        "kind": "article",
+        "url": url,
+        "title": title,
+        "author": "",
+        "date": "",
+        "excerpt": warning,
+        "text": warning,
     }
 
 
@@ -392,8 +486,13 @@ ARTICLE_JS = r"""
 
 def capture_youtube(browser: str | None = None, data: dict | None = None, url: str | None = None) -> Path:
     if data is None:
-        data = youtube_data_from_url(url) if url else active_tab_json(browser or "", YOUTUBE_JS)
-    transcript = fetch_transcript(data.get("captionTracks", []))
+        try:
+            data = youtube_data_from_url(url) if url else active_tab_json(browser or "", YOUTUBE_JS)
+        except (CaptureError, urllib.error.URLError, ET.ParseError, json.JSONDecodeError) as exc:
+            if not url:
+                raise
+            data = minimal_youtube_data(url, exc)
+    transcript, has_transcript = transcript_or_warning(data.get("captionTracks", []))
     title = data.get("title") or "YouTube Video"
     url = data.get("url") or ""
     video_id = data.get("videoId") or extract_youtube_id(url)
@@ -413,6 +512,8 @@ Duration: {duration}
 
 Channel: {author}
 
+Capture warning: {data.get("captureWarning", "")}
+
 ## Transcript
 
 {transcript}
@@ -421,18 +522,26 @@ Channel: {author}
         title=title,
         author=author,
         reference=url,
-        content_types=["youtube", "transcript", "markdown"],
+        content_types=["youtube", "transcript" if has_transcript else "metadata", "markdown"],
         body=body,
     )
 
 
 def capture_article(browser: str | None = None, data: dict | None = None, url: str | None = None) -> Path:
     if data is None:
-        data = article_data_from_url(url) if url else active_tab_json(browser or "", ARTICLE_JS)
+        try:
+            data = article_data_from_url(url) if url else active_tab_json(browser or "", ARTICLE_JS)
+        except (CaptureError, urllib.error.URLError) as exc:
+            if not url:
+                raise
+            data = minimal_article_data(url, exc)
     title = data.get("title") or "Article"
     text = data.get("text") or ""
     if len(text.strip()) < 300:
-        raise CaptureError("Could not extract enough article text from this page.")
+        text = (
+            "Full article text could not be captured automatically.\n\n"
+            "The metadata and excerpt below were saved for follow-up."
+        )
     body = f"""# {title}
 
 Source type: Article
@@ -486,7 +595,7 @@ def capture_current_page() -> Path:
     try:
         probe = active_tab_json(browser, 'JSON.stringify({url: location.href, title: document.title})')
     except CaptureError:
-        url = active_url_via_clipboard()
+        url = active_url_fallback(browser)
         if "youtube.com/watch" in url or "youtu.be/" in url:
             return capture_youtube(url=url)
         return capture_article(url=url)
@@ -496,12 +605,21 @@ def capture_current_page() -> Path:
     return capture_article(browser)
 
 
+def capture_url(url: str) -> Path:
+    if not is_capture_url(url):
+        raise CaptureError(f"Not a captureable URL: {url}")
+    if "youtube.com/watch" in url or "youtu.be/" in url:
+        return capture_youtube(url=url)
+    return capture_article(url=url)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--skip-maintenance", action="store_true")
+    parser.add_argument("--url", help="Capture a specific URL instead of reading the active browser.")
     args = parser.parse_args()
     try:
-        path = capture_current_page()
+        path = capture_url(args.url) if args.url else capture_current_page()
         if not args.skip_maintenance:
             run_maintenance()
         run_ingest_command(path)
