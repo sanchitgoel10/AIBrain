@@ -14,8 +14,8 @@ The capture floater is a lightweight Mac tool for saving a YouTube video or arti
 
 Clicking the floating button:
 
-1. Opens a confirmation box for the page to capture. The box shows the detected title, source, and exact editable URL.
-2. Captures only the confirmed URL, so stale browser history cannot silently save the wrong page.
+1. Opens a confirmation box for the page to capture. The box shows a dropdown of recent Dia/session/history candidates, the detected title, source, and exact editable URL.
+2. Captures only the selected or typed URL, so stale clipboard or browser history cannot silently save the wrong page.
 3. If the page is YouTube, checks Transcribe's cache and then calls its agent API when needed.
 4. Saves title, URL, channel, timestamp from the URL when present, duration, summary, Transcribe permalink, and timestamped transcript.
 5. If the page is an article, captures title, URL, author, date, excerpt, and readable page text.
@@ -67,3 +67,5 @@ python3 scripts/capture_current_page.py --url "https://example.com/article"
 The floater captures sources deterministically and keeps them visible to Obsidian because they are Markdown files under `Raw/Sources/`. Semantic ingestion into connected Wiki concepts still requires an AI agent/model. Without `AIBRAIN_INGEST_COMMAND`, captured sources remain unprocessed source notes until an agent ingests them.
 
 Because this path avoids active-tab Apple Events, it does not depend on Dia supporting Chrome's AppleScript tab API. For exact current playback time, paste a YouTube URL that includes a `t=` timestamp.
+
+Dia does not expose the active tab through the Chrome AppleScript API, so the floater reads Dia's local session and history files. If the first candidate is not the page you meant, choose another candidate from the dropdown or paste the exact URL into the field before pressing Capture.

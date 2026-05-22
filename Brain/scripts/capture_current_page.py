@@ -45,6 +45,9 @@ BROWSER_HISTORY_PATHS = {
     "Microsoft Edge": ["~/Library/Application Support/Microsoft Edge/Default/History"],
     "Arc": ["~/Library/Application Support/Arc/User Data/Default/History"],
 }
+BROWSER_SESSION_PATHS = {
+    "Dia": ["~/Library/Application Support/Dia/User Data/Default/Sessions"],
+}
 
 
 class CaptureError(RuntimeError):
@@ -131,11 +134,44 @@ def is_capture_url(url: str) -> bool:
         return False
     parsed = urllib.parse.urlparse(url)
     blocked_prefixes = ("chrome.", "newtab.", "dia.")
-    blocked_suffixes = ("netflix.com",)
+    blocked_suffixes = (
+        "accounts.google.com",
+        "chatgpt.com",
+        "contacts.google.com",
+        "gemini.google.com",
+        "googleusercontent.com",
+        "googlevideo.com",
+        "mail.google.com",
+        "netflix.com",
+        "plausible.io",
+        "studio.workspace.google.com",
+        "usetranscribe.io",
+    )
     host = parsed.netloc.lower()
     if any(host.startswith(prefix) for prefix in blocked_prefixes):
         return False
     return not any(host == suffix or host.endswith(f".{suffix}") for suffix in blocked_suffixes)
+
+
+def hostname_label(url: str) -> str:
+    host = urllib.parse.urlparse(url).netloc.lower()
+    return host.removeprefix("www.") or "URL"
+
+
+def clean_session_url(raw_url: str) -> str:
+    url = raw_url.strip().rstrip(".,);]")
+    parsed = urllib.parse.urlparse(url)
+    if not parsed.scheme or not parsed.netloc:
+        return ""
+    return urllib.parse.urlunparse(parsed)
+
+
+def history_title_lookup() -> dict[str, str]:
+    titles: dict[str, str] = {}
+    for browser in BROWSER_HISTORY_PATHS:
+        for entry in latest_history_entries(browser, limit=250):
+            titles.setdefault(entry["url"], entry.get("title", ""))
+    return titles
 
 
 def latest_history_url(browser: str) -> str:
@@ -146,6 +182,12 @@ def latest_history_url(browser: str) -> str:
 
 
 def latest_history_entry(browser: str) -> dict | None:
+    entries = latest_history_entries(browser, limit=50)
+    return entries[0] if entries else None
+
+
+def latest_history_entries(browser: str, *, limit: int = 50) -> list[dict]:
+    entries = []
     for raw_path in BROWSER_HISTORY_PATHS.get(browser, []):
         history_path = Path(raw_path).expanduser()
         if not history_path.exists():
@@ -159,13 +201,50 @@ def latest_history_entry(browser: str) -> dict | None:
                     FROM urls
                     WHERE url LIKE 'http%'
                     ORDER BY last_visit_time DESC
-                    LIMIT 50
-                    """
+                    LIMIT ?
+                    """,
+                    (limit,),
                 ).fetchall()
         for url, title, last_visit_time in rows:
             if is_capture_url(url):
-                return {"browser": browser, "url": url, "title": title or "", "last_visit_time": last_visit_time}
-    return None
+                entries.append({"browser": browser, "url": url, "title": title or "", "last_visit_time": last_visit_time})
+    return sorted(entries, key=lambda item: item["last_visit_time"], reverse=True)
+
+
+def session_url_entries(browser: str, *, limit: int = 25) -> list[dict]:
+    titles = history_title_lookup()
+    entries = []
+    for raw_dir in BROWSER_SESSION_PATHS.get(browser, []):
+        session_dir = Path(raw_dir).expanduser()
+        if not session_dir.exists():
+            continue
+        session_files = sorted(
+            [path for path in session_dir.iterdir() if path.is_file() and path.name.startswith(("Session_", "Tabs_"))],
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )[:4]
+        for session_file in session_files:
+            try:
+                text = session_file.read_bytes().decode("latin-1", errors="ignore")
+            except OSError:
+                continue
+            raw_urls = re.findall(r"https?://[^\x00\s\"'<>{}]+", text)
+            for raw_url in reversed(raw_urls):
+                url = clean_session_url(raw_url)
+                if not is_capture_url(url):
+                    continue
+                entries.append(
+                    {
+                        "browser": browser,
+                        "url": url,
+                        "title": titles.get(url, "") or hostname_label(url),
+                        "last_visit_time": int(session_file.stat().st_mtime * 1_000_000),
+                        "source": "session",
+                    }
+                )
+                if len(entries) >= limit:
+                    return dedupe_candidates(entries)
+    return dedupe_candidates(entries)
 
 
 def latest_history_entry_any_browser() -> dict:
@@ -175,20 +254,56 @@ def latest_history_entry_any_browser() -> dict:
     return sorted(entries, key=lambda item: item["last_visit_time"], reverse=True)[0]
 
 
-def candidate_page() -> dict:
+def dedupe_candidates(entries: list[dict]) -> list[dict]:
+    seen = set()
+    unique = []
+    for entry in entries:
+        url = entry.get("url", "")
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        unique.append(entry)
+    return unique
+
+
+def candidate_pages(limit: int = 12) -> list[dict]:
+    entries = []
+    for browser in BROWSER_SESSION_PATHS:
+        entries.extend(session_url_entries(browser, limit=limit))
+    for browser in BROWSER_HISTORY_PATHS:
+        for entry in latest_history_entries(browser, limit=40):
+            entry = dict(entry)
+            entry["source"] = "history"
+            entries.append(entry)
     clipboard_url = clipboard_capture_url()
     if clipboard_url:
-        return {"url": clipboard_url, "title": "Clipboard URL", "browser": "", "source": "clipboard"}
-    try:
-        entry = latest_history_entry_any_browser()
-        return {
-            "url": entry.get("url", ""),
-            "title": entry.get("title", ""),
-            "browser": entry.get("browser", ""),
-            "source": "history",
-        }
-    except CaptureError:
-        return {"url": "", "title": "", "browser": "", "source": ""}
+        entries.append(
+            {
+                "url": clipboard_url,
+                "title": "Clipboard URL",
+                "browser": "",
+                "source": "clipboard",
+                "last_visit_time": 0,
+            }
+        )
+    normalized = []
+    for entry in dedupe_candidates(entries):
+        normalized.append(
+            {
+                "url": entry.get("url", ""),
+                "title": entry.get("title", "") or hostname_label(entry.get("url", "")),
+                "browser": entry.get("browser", ""),
+                "source": entry.get("source", "history"),
+            }
+        )
+        if len(normalized) >= limit:
+            break
+    return normalized
+
+
+def candidate_page() -> dict:
+    pages = candidate_pages(limit=1)
+    return pages[0] if pages else {"url": "", "title": "", "browser": "", "source": ""}
 
 
 def candidate_url() -> str:
@@ -843,8 +958,12 @@ def main() -> int:
     parser.add_argument("--url", help="Capture a specific URL instead of reading the active browser.")
     parser.add_argument("--candidate-url", action="store_true", help="Print a best-effort URL candidate and exit.")
     parser.add_argument("--candidate-json", action="store_true", help="Print a best-effort URL candidate with title and exit.")
+    parser.add_argument("--candidate-list-json", action="store_true", help="Print recent URL candidates with titles and exit.")
     parser.add_argument("--from-history", action="store_true", help="Capture the newest local Chromium history URL.")
     args = parser.parse_args()
+    if args.candidate_list_json:
+        print(json.dumps(candidate_pages()))
+        return 0
     if args.candidate_json:
         print(json.dumps(candidate_page()))
         return 0

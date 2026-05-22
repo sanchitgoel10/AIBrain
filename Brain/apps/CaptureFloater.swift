@@ -121,6 +121,10 @@ final class CaptureButtonView: NSView {
 final class CaptureDelegate: NSObject, NSApplicationDelegate {
     var window: NSPanel!
     let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+    var dialogCandidates: [CaptureCandidate] = []
+    weak var dialogTitleLabel: NSTextField?
+    weak var dialogSourceLabel: NSTextField?
+    weak var dialogURLInput: NSTextField?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -149,7 +153,7 @@ final class CaptureDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func capture() {
-        guard let url = askForURL(candidate: candidatePage()) else {
+        guard let url = askForURL(candidates: candidatePages()) else {
             return
         }
 
@@ -181,11 +185,11 @@ final class CaptureDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    func candidatePage() -> CaptureCandidate {
+    func candidatePages() -> [CaptureCandidate] {
         let task = Process()
         task.currentDirectoryURL = root
         task.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
-        task.arguments = ["scripts/capture_current_page.py", "--candidate-json"]
+        task.arguments = ["scripts/capture_current_page.py", "--candidate-list-json"]
 
         let output = Pipe()
         task.standardOutput = output
@@ -195,40 +199,53 @@ final class CaptureDelegate: NSObject, NSApplicationDelegate {
             try task.run()
             task.waitUntilExit()
         } catch {
-            return .empty
+            return []
         }
 
         let data = output.fileHandleForReading.readDataToEndOfFile()
-        guard let candidate = try? JSONDecoder().decode(CaptureCandidate.self, from: data),
-              isCaptureURL(candidate.url) else {
-            return .empty
+        guard let candidates = try? JSONDecoder().decode([CaptureCandidate].self, from: data) else {
+            return []
         }
-        return candidate
+        return candidates.filter { isCaptureURL($0.url) }
     }
 
-    func askForURL(candidate: CaptureCandidate) -> String? {
+    func askForURL(candidates: [CaptureCandidate]) -> String? {
         NSApp.activate(ignoringOtherApps: true)
 
-        let stack = NSStackView(frame: NSRect(x: 0, y: 0, width: 560, height: 118))
+        dialogCandidates = candidates.isEmpty ? [.empty] : candidates
+        let initial = dialogCandidates[0]
+
+        let stack = NSStackView(frame: NSRect(x: 0, y: 0, width: 560, height: 154))
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 8
 
+        let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 560, height: 28), pullsDown: false)
+        for (index, candidate) in dialogCandidates.enumerated() {
+            popup.addItem(withTitle: menuTitle(for: candidate, index: index))
+            popup.item(at: index)?.tag = index
+        }
+        popup.target = self
+        popup.action = #selector(candidateSelectionChanged(_:))
+
         let titleLabel = wrappingLabel(
-            candidate.title.isEmpty ? "Title: unknown" : "Title: \(candidate.title)",
+            initial.title.isEmpty ? "Title: unknown" : "Title: \(initial.title)",
             width: 560,
             bold: true
         )
-        let sourceText = candidate.source == "history" && !candidate.browser.isEmpty
-            ? "Source: \(candidate.browser) recent history"
-            : (candidate.source.isEmpty ? "Source: pasted or typed URL" : "Source: \(candidate.source)")
+        let sourceText = sourceLabelText(for: initial)
         let sourceLabel = wrappingLabel(sourceText, width: 560, bold: false)
 
         let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 560, height: 28))
-        input.stringValue = candidate.url
+        input.stringValue = initial.url
         input.placeholderString = "https://www.youtube.com/watch?v=... or https://example.com/article"
         input.lineBreakMode = .byTruncatingMiddle
 
+        dialogTitleLabel = titleLabel
+        dialogSourceLabel = sourceLabel
+        dialogURLInput = input
+
+        stack.addArrangedSubview(popup)
         stack.addArrangedSubview(titleLabel)
         stack.addArrangedSubview(sourceLabel)
         stack.addArrangedSubview(input)
@@ -253,6 +270,36 @@ final class CaptureDelegate: NSObject, NSApplicationDelegate {
 
         show("Capture error", "Paste a valid http or https URL.")
         return nil
+    }
+
+    @objc func candidateSelectionChanged(_ sender: NSPopUpButton) {
+        let index = sender.selectedTag()
+        guard dialogCandidates.indices.contains(index) else {
+            return
+        }
+        let candidate = dialogCandidates[index]
+        dialogTitleLabel?.stringValue = candidate.title.isEmpty ? "Title: unknown" : "Title: \(candidate.title)"
+        dialogSourceLabel?.stringValue = sourceLabelText(for: candidate)
+        dialogURLInput?.stringValue = candidate.url
+    }
+
+    func menuTitle(for candidate: CaptureCandidate, index: Int) -> String {
+        let title = candidate.title.isEmpty ? candidate.url : candidate.title
+        let source = candidate.source.isEmpty ? "manual" : candidate.source
+        return "\(index + 1). \(title) [\(source)]"
+    }
+
+    func sourceLabelText(for candidate: CaptureCandidate) -> String {
+        if candidate.source == "session" && !candidate.browser.isEmpty {
+            return "Source: \(candidate.browser) open session"
+        }
+        if candidate.source == "history" && !candidate.browser.isEmpty {
+            return "Source: \(candidate.browser) recent history"
+        }
+        if candidate.source.isEmpty {
+            return "Source: pasted or typed URL"
+        }
+        return "Source: \(candidate.source)"
     }
 
     func wrappingLabel(_ text: String, width: CGFloat, bold: Bool) -> NSTextField {
