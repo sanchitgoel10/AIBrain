@@ -14,12 +14,13 @@ The capture floater is a lightweight Mac tool for saving a YouTube video or arti
 
 Clicking the floating button:
 
-1. Finds the most recent captureable URL from local Chromium browser history, or accepts an explicit `--url`.
-2. If the page is YouTube, checks Transcribe's cache and then calls its agent API when needed.
-3. Saves title, URL, channel, timestamp from the URL when present, duration, summary, Transcribe permalink, and timestamped transcript.
-4. If the page is an article, captures title, URL, author, date, excerpt, and readable page text.
-5. Writes a Markdown source note into `Raw/Sources/`.
-6. Runs:
+1. Opens a confirmation box for the URL to capture. The box is prefilled from the clipboard when it contains a URL, otherwise from the newest local Chromium/Dia history URL.
+2. Captures only the confirmed URL, so stale browser history cannot silently save the wrong page.
+3. If the page is YouTube, checks Transcribe's cache and then calls its agent API when needed.
+4. Saves title, URL, channel, timestamp from the URL when present, duration, summary, Transcribe permalink, and timestamped transcript.
+5. If the page is an article, captures title, URL, author, date, excerpt, and readable page text.
+6. Writes a Markdown source note into `Raw/Sources/`.
+7. Runs:
 
 ```bash
 python3 scripts/wiki_tool.py build
@@ -53,8 +54,14 @@ Direct URL test:
 python3 scripts/capture_current_page.py --url "https://www.youtube.com/watch?v=VIDEO_ID"
 ```
 
+Article test:
+
+```bash
+python3 scripts/capture_current_page.py --url "https://example.com/article"
+```
+
 ## Current Limitation
 
 The floater captures sources deterministically and keeps them visible to Obsidian because they are Markdown files under `Raw/Sources/`. Semantic ingestion into connected Wiki concepts still requires an AI agent/model. Without `AIBRAIN_INGEST_COMMAND`, captured sources remain unprocessed source notes until an agent ingests them.
 
-Because this path avoids active-tab Apple Events, it does not depend on Dia supporting Chrome's AppleScript tab API. The tradeoff is that it uses the most recent URL recorded in browser history; for exact current playback time, open or copy a URL that includes a YouTube `t=` timestamp.
+Because this path avoids active-tab Apple Events, it does not depend on Dia supporting Chrome's AppleScript tab API. For exact current playback time, paste a YouTube URL that includes a `t=` timestamp.

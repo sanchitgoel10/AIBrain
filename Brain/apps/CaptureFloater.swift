@@ -140,10 +140,14 @@ final class CaptureDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func capture() {
+        guard let url = askForURL(defaultURL: candidateURL()) else {
+            return
+        }
+
         let task = Process()
         task.currentDirectoryURL = root
         task.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
-        task.arguments = ["scripts/capture_current_page.py"]
+        task.arguments = ["scripts/capture_current_page.py", "--url", url]
 
         let output = Pipe()
         let error = Pipe()
@@ -166,6 +170,77 @@ final class CaptureDelegate: NSObject, NSApplicationDelegate {
         } else {
             show("Capture error", errText.trimmingCharacters(in: .whitespacesAndNewlines))
         }
+    }
+
+    func candidateURL() -> String {
+        if let rawClipboard = NSPasteboard.general.string(forType: .string) {
+            let clipboard = rawClipboard.trimmingCharacters(in: .whitespacesAndNewlines)
+            if isCaptureURL(clipboard) {
+                return clipboard
+            }
+        }
+
+        let task = Process()
+        task.currentDirectoryURL = root
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        task.arguments = ["scripts/capture_current_page.py", "--candidate-url"]
+
+        let output = Pipe()
+        task.standardOutput = output
+        task.standardError = Pipe()
+
+        do {
+            try task.run()
+            task.waitUntilExit()
+        } catch {
+            return ""
+        }
+
+        let text = String(data: output.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let candidate = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return isCaptureURL(candidate) ? candidate : ""
+    }
+
+    func askForURL(defaultURL: String) -> String? {
+        NSApp.activate(ignoringOtherApps: true)
+
+        let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 520, height: 28))
+        input.stringValue = defaultURL
+        input.placeholderString = "https://www.youtube.com/watch?v=... or https://example.com/article"
+
+        let alert = NSAlert()
+        alert.messageText = "Capture URL"
+        alert.informativeText = "Confirm the YouTube or article URL to save into AI Brain."
+        alert.accessoryView = input
+        alert.addButton(withTitle: "Capture")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = input
+
+        let response = alert.runModal()
+        guard response == .alertFirstButtonReturn else {
+            return nil
+        }
+
+        let url = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if isCaptureURL(url) {
+            return url
+        }
+
+        show("Capture error", "Paste a valid http or https URL.")
+        return nil
+    }
+
+    func isCaptureURL(_ value: String) -> Bool {
+        guard let url = URL(string: value),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              let host = url.host?.lowercased() else {
+            return false
+        }
+        if host.hasPrefix("chrome.") || host.hasPrefix("newtab.") || host.hasPrefix("dia.") {
+            return false
+        }
+        return host != "netflix.com" && !host.hasSuffix(".netflix.com")
     }
 
     func show(_ title: String, _ message: String) {

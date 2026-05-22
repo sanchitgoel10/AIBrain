@@ -116,12 +116,26 @@ end tell
     return url
 
 
+def clipboard_capture_url() -> str:
+    result = subprocess.run(["pbpaste"], text=True, capture_output=True, check=False)
+    if result.returncode != 0:
+        return ""
+    text = result.stdout.strip()
+    if is_capture_url(text):
+        return text
+    return ""
+
+
 def is_capture_url(url: str) -> bool:
     if not re.match(r"^https?://", url or ""):
         return False
     parsed = urllib.parse.urlparse(url)
     blocked_prefixes = ("chrome.", "newtab.", "dia.")
-    return not any(parsed.netloc.startswith(prefix) for prefix in blocked_prefixes)
+    blocked_suffixes = ("netflix.com",)
+    host = parsed.netloc.lower()
+    if any(host.startswith(prefix) for prefix in blocked_prefixes):
+        return False
+    return not any(host == suffix or host.endswith(f".{suffix}") for suffix in blocked_suffixes)
 
 
 def latest_history_url(browser: str) -> str:
@@ -159,6 +173,16 @@ def latest_history_entry_any_browser() -> dict:
     if not entries:
         raise CaptureError("Could not find a recent captureable URL in local Chromium browser history.")
     return sorted(entries, key=lambda item: item["last_visit_time"], reverse=True)[0]
+
+
+def candidate_url() -> str:
+    clipboard_url = clipboard_capture_url()
+    if clipboard_url:
+        return clipboard_url
+    try:
+        return latest_history_entry_any_browser()["url"]
+    except CaptureError:
+        return ""
 
 
 def active_url_fallback(browser: str) -> str:
@@ -802,9 +826,19 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--skip-maintenance", action="store_true")
     parser.add_argument("--url", help="Capture a specific URL instead of reading the active browser.")
+    parser.add_argument("--candidate-url", action="store_true", help="Print a best-effort URL candidate and exit.")
+    parser.add_argument("--from-history", action="store_true", help="Capture the newest local Chromium history URL.")
     args = parser.parse_args()
+    if args.candidate_url:
+        print(candidate_url())
+        return 0
     try:
-        path = capture_url(args.url) if args.url else capture_current_page()
+        if args.url:
+            path = capture_url(args.url)
+        elif args.from_history:
+            path = capture_current_page()
+        else:
+            raise CaptureError("Pass --url, or use the floater prompt. History capture is available with --from-history.")
         if not args.skip_maintenance:
             run_maintenance()
         run_ingest_command(path)
