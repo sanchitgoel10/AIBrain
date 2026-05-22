@@ -88,23 +88,18 @@ end tell
 
 def active_url_via_clipboard() -> str:
     script = r'''
-set previousClipboard to ""
-try
-  set previousClipboard to the clipboard as text
-end try
 tell application "System Events"
   keystroke "l" using command down
   delay 0.08
   keystroke "c" using command down
-  delay 0.08
+  delay 0.12
 end tell
-set copiedUrl to the clipboard as text
-try
-  set the clipboard to previousClipboard
-end try
-return copiedUrl
 '''
-    url = run_osascript(script).strip()
+    run_osascript(script)
+    result = subprocess.run(["pbpaste"], text=True, capture_output=True, check=False)
+    if result.returncode != 0:
+        raise CaptureError(result.stderr.strip() or "Could not read the clipboard text.")
+    url = result.stdout.strip()
     if not re.match(r"^https?://", url):
         raise CaptureError("Could not read the active page URL from Dia.")
     return url
