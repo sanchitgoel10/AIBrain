@@ -42,9 +42,21 @@ In Dia or another Chromium browser:
 3. The extension sends the exact active tab URL to the local bridge.
 4. The bridge saves the note in `Raw/Sources/`.
 
+The extension badge shows progress:
+
+```text
+1/3 queued
+2/3 capturing transcript or article text
+3/3 updating the AI Brain catalog
+OK  complete
+ERR failed
+```
+
 For YouTube, Transcribe is the primary transcript provider. If no transcript is captured, the bridge returns an error and does not save a metadata-only source.
 
-For articles, the bridge fetches the page HTML and saves readable text when available.
+Uncached YouTube videos can take a few minutes while Transcribe resolves and transcribes them. Keep the bridge terminal running until the badge changes to `OK` or `ERR`.
+
+For articles, the extension extracts the visible page text from the browser tab and sends it to the bridge. This is important for logged-in or subscription pages, because Python fetching the URL directly may only see a logged-out shell.
 
 ## Why This Replaces The Floater
 

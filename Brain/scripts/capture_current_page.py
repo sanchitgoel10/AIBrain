@@ -887,7 +887,7 @@ def capture_article(browser: str | None = None, data: dict | None = None, url: s
             data = minimal_article_data(url, exc)
     title = data.get("title") or "Article"
     text = data.get("text") or ""
-    if len(text.strip()) < 300:
+    if len(text.strip()) < 300 and not data.get("browserExtracted"):
         text = (
             "Full article text could not be captured automatically.\n\n"
             "The metadata and excerpt below were saved for follow-up."
@@ -910,11 +910,14 @@ Published: {data.get("date", "")}
 
 {text}
 """
+    content_types = ["article", "markdown"]
+    if data.get("browserExtracted"):
+        content_types.insert(1, "browser-extracted")
     return write_source_note(
         title=title,
         author=data.get("author", ""),
         reference=data.get("url", ""),
-        content_types=["article", "markdown"],
+        content_types=content_types,
         body=body,
     )
 
