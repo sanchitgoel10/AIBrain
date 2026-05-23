@@ -21,6 +21,7 @@ HOST = "127.0.0.1"
 PORT = 8765
 JOBS: dict[str, dict] = {}
 JOBS_LOCK = threading.Lock()
+INGEST_LOCK = threading.Lock()
 
 
 def set_job(job_id: str, **updates: object) -> None:
@@ -143,27 +144,28 @@ def run_capture_job(job_id: str, payload: dict) -> None:
             set_job(job_id, status="capturing", message="Fetching article page text.")
             path = capture.capture_article(url=url)
 
-        set_job(job_id, status="ingesting", message="Creating linked Wiki ingest note.")
-        ingest_path = auto_ingest.ingest_source(path)
+        with INGEST_LOCK:
+            set_job(job_id, status="ingesting", message="Creating linked Wiki ingest note.")
+            ingest_path = auto_ingest.ingest_source(path)
 
-        set_job(job_id, status="maintenance", message="Updating AI Brain catalog and source manifest.")
-        capture.run_maintenance()
-        subprocess.run(
-            [
-                "python3",
-                str(capture.WIKI_TOOL),
-                "source-scan",
-                "--update",
-                "--accept-covered",
-            ],
-            cwd=capture.ROOT,
-            check=True,
-        )
-        subprocess.run(
-            ["python3", str(capture.WIKI_TOOL), "source-lint"],
-            cwd=capture.ROOT,
-            check=True,
-        )
+            set_job(job_id, status="maintenance", message="Updating AI Brain catalog and source manifest.")
+            capture.run_maintenance()
+            subprocess.run(
+                [
+                    "python3",
+                    str(capture.WIKI_TOOL),
+                    "source-scan",
+                    "--update",
+                    "--accept-covered",
+                ],
+                cwd=capture.ROOT,
+                check=True,
+            )
+            subprocess.run(
+                ["python3", str(capture.WIKI_TOOL), "source-lint"],
+                cwd=capture.ROOT,
+                check=True,
+            )
         capture.run_ingest_command(path)
     except (capture.CaptureError, subprocess.CalledProcessError, OSError, ValueError, json.JSONDecodeError) as exc:
         set_job(job_id, status="error", ok=False, error=str(exc), message=str(exc))
