@@ -20,6 +20,8 @@ tags:
 
 Required fields: `Title`, `Reference`, `Created`, `Processed`, `tags`.
 
+Common `ContentType` values include `markdown`, `youtube`, `transcript`, `article`, `browser-extracted`, `epub`, and `book`.
+
 ## Compiled Wiki Notes
 
 Compiled notes live under `Wiki/Topics/`, `Wiki/Concepts/`, `Wiki/Entities/`, `Wiki/Projects/`, or `Wiki/Logs/`.
@@ -47,4 +49,3 @@ Allowed compiled tags:
 - `log`
 
 Every compiled note must cite one or more Raw source files in `sources`.
-

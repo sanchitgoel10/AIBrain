@@ -53,6 +53,13 @@ python3 scripts/wiki_tool.py log --title "title" --details "details"
 Appends a short maintenance entry to `Wiki/log.md`.
 
 ```bash
+python3 scripts/wiki_tool.py import-epub Raw/Files/book.epub
+python3 scripts/wiki_tool.py import-epub Raw/Files/book.epub --ingest
+```
+
+Extracts an EPUB book into a Markdown source note under `Raw/Sources/`. With `--ingest`, also creates the linked Wiki ingest note, rebuilds indexes, updates the source manifest, and runs source lint. Keep the original `.epub` in `Raw/Files/`; that folder is ignored by Git.
+
+```bash
 python3 scripts/audit_public.py
 ```
 

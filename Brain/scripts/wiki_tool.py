@@ -8,6 +8,7 @@ import datetime as dt
 import json
 import platform
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -352,6 +353,58 @@ def cmd_log(args) -> int:
     return 0
 
 
+def cmd_import_epub(args) -> int:
+    import book_import
+
+    try:
+        result = book_import.import_epub(
+            args.epub,
+            title=args.title,
+            author=args.author,
+            max_chars=args.max_chars,
+            dry_run=args.dry_run,
+        )
+    except (
+        book_import.BookImportError,
+        book_import.zipfile.BadZipFile,
+        book_import.ET.ParseError,
+        OSError,
+    ) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    if args.dry_run:
+        print(result)
+        return 0
+
+    source_path = Path(result)
+    print(rel(source_path))
+    if not args.ingest:
+        return 0
+
+    import auto_ingest
+
+    ingest_path = auto_ingest.ingest_source(source_path)
+    print(rel(ingest_path))
+    cmd_build(argparse.Namespace())
+    subprocess.run(
+        [
+            sys.executable,
+            str(Path(__file__).resolve()),
+            "source-scan",
+            "--update",
+            "--accept-covered",
+        ],
+        cwd=ROOT,
+        check=True,
+    )
+    subprocess.run(
+        [sys.executable, str(Path(__file__).resolve()), "source-lint"],
+        cwd=ROOT,
+        check=True,
+    )
+    return 0
+
+
 def fail(errors: list[str], ok_message: str = "doctor passed") -> int:
     if errors:
         for error in errors:
@@ -381,6 +434,14 @@ def main() -> int:
     log.add_argument("--title", required=True)
     log.add_argument("--details", required=True)
     log.set_defaults(func=cmd_log)
+    epub = sub.add_parser("import-epub")
+    epub.add_argument("epub", help="Path to a .epub file, preferably under Raw/Files/.")
+    epub.add_argument("--title", default="", help="Override the EPUB title metadata.")
+    epub.add_argument("--author", default="", help="Override the EPUB author metadata.")
+    epub.add_argument("--max-chars", type=int, default=0, help="Optional maximum body size for very large books.")
+    epub.add_argument("--dry-run", action="store_true", help="Print the generated Raw source note without writing it.")
+    epub.add_argument("--ingest", action="store_true", help="Create a linked Wiki ingest note and update indexes.")
+    epub.set_defaults(func=cmd_import_epub)
     args = parser.parse_args()
     return args.func(args)
 

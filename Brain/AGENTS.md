@@ -6,6 +6,7 @@ This vault is an LLM Wiki. Treat it as a layered knowledge system, not as a gene
 
 - `Raw/Sources/` contains source material. Do not rewrite Raw sources as if they were compiled notes.
 - `Raw/Files/` is for binary or bulky source files. These files are ignored by Git by default.
+- EPUB books should be kept in `Raw/Files/` and imported into `Raw/Sources/` with `python3 scripts/wiki_tool.py import-epub Raw/Files/book.epub --ingest`.
 - `Wiki/` contains reusable compiled knowledge.
 - `Schema/` contains the rules, contracts, manifests, and command references that keep the system coherent.
 

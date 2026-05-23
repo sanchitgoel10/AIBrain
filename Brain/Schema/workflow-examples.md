@@ -21,6 +21,17 @@ python3 scripts/wiki_tool.py source-scan --update --accept-covered
 python3 scripts/wiki_tool.py source-lint
 ```
 
+## Ingest An EPUB Book
+
+1. Put the `.epub` file in `Raw/Files/`.
+2. Convert it into a Raw source and connect it to the graph:
+
+```bash
+python3 scripts/wiki_tool.py import-epub Raw/Files/book.epub --ingest
+```
+
+3. Promote durable claims from the generated ingest log into focused `Wiki/Topics/`, `Wiki/Concepts/`, `Wiki/Entities/`, or `Wiki/Projects/` notes when reviewing the book.
+
 ## Answer From The Wiki
 
 1. Start with `Wiki/index.md`.
@@ -28,4 +39,3 @@ python3 scripts/wiki_tool.py source-lint
 3. Open relevant compiled Wiki notes.
 4. Open Raw sources only when the compiled note does not provide enough support.
 5. Cite both the compiled note and Raw source when source material affects the answer.
-
