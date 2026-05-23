@@ -1,0 +1,152 @@
+:root {
+  color-scheme: light;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+body {
+  margin: 0;
+  width: 340px;
+  background: #f7f8fb;
+  color: #15171c;
+}
+
+.shell {
+  padding: 14px;
+}
+
+.top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.mark {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border-radius: 8px;
+  background: #155eef;
+  color: white;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0;
+  box-shadow: 0 8px 18px rgba(21, 94, 239, 0.25);
+}
+
+h1 {
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.2;
+}
+
+p {
+  margin: 0;
+}
+
+#kind {
+  margin-top: 2px;
+  color: #606778;
+  font-size: 12px;
+}
+
+.page {
+  border: 1px solid #e2e5ec;
+  border-radius: 8px;
+  background: white;
+  padding: 10px;
+}
+
+.title {
+  display: -webkit-box;
+  overflow: hidden;
+  min-height: 20px;
+  color: #20242d;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.url {
+  overflow: hidden;
+  margin-top: 6px;
+  color: #697386;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.progress {
+  overflow: hidden;
+  height: 8px;
+  margin-top: 12px;
+  border-radius: 999px;
+  background: #e7eaf1;
+}
+
+.progress-bar {
+  width: 0%;
+  height: 100%;
+  border-radius: inherit;
+  background: #155eef;
+  transition: width 180ms ease, background 180ms ease;
+}
+
+.progress-bar.queued {
+  width: 25%;
+  background: #155eef;
+}
+
+.progress-bar.capturing {
+  width: 60%;
+  background: #7c3aed;
+}
+
+.progress-bar.ingesting {
+  width: 74%;
+  background: #0f766e;
+}
+
+.progress-bar.maintenance {
+  width: 88%;
+  background: #b45309;
+}
+
+.progress-bar.done {
+  width: 100%;
+  background: #16833a;
+}
+
+.progress-bar.error {
+  width: 100%;
+  background: #b42318;
+}
+
+.status {
+  min-height: 34px;
+  margin-top: 10px;
+  color: #3f4757;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+button {
+  width: 100%;
+  height: 38px;
+  margin-top: 10px;
+  border: 0;
+  border-radius: 8px;
+  background: #15171c;
+  color: white;
+  font-size: 13px;
+  font-weight: 720;
+}
+
+button:disabled {
+  cursor: wait;
+  background: #8992a3;
+}

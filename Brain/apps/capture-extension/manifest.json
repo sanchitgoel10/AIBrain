@@ -5,10 +5,8 @@
   "description": "Capture the exact active YouTube or article tab into the local AI Brain vault.",
   "permissions": ["activeTab", "tabs", "scripting"],
   "host_permissions": ["http://127.0.0.1:8765/*"],
-  "background": {
-    "service_worker": "background.js"
-  },
   "action": {
-    "default_title": "Capture to AI Brain"
+    "default_title": "Add to Brain",
+    "default_popup": "popup.html"
   }
 }

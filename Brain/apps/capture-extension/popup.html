@@ -1,0 +1,33 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Add to Brain</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main class="shell">
+      <header class="top">
+        <div class="mark">ATB</div>
+        <div>
+          <h1>Add to Brain</h1>
+          <p id="kind">Reading active tab</p>
+        </div>
+      </header>
+
+      <section class="page">
+        <div id="title" class="title">Loading...</div>
+        <div id="url" class="url"></div>
+      </section>
+
+      <section class="progress" aria-label="Capture progress">
+        <div id="progressBar" class="progress-bar idle"></div>
+      </section>
+
+      <p id="status" class="status">Ready.</p>
+
+      <button id="capture" type="button">Add to Brain</button>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>
