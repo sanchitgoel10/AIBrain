@@ -71,21 +71,95 @@ function extractVisiblePage() {
   };
 }
 
+function articleScrollPlan() {
+  const height = Math.max(
+    document.body?.scrollHeight || 0,
+    document.documentElement?.scrollHeight || 0
+  );
+  const viewport = Math.max(window.innerHeight || 800, 500);
+  const maxY = Math.max(height - viewport, 0);
+  const step = Math.max(Math.floor(viewport * 0.82), 350);
+  const positions = [];
+  for (let y = 0; y <= maxY; y += step) {
+    positions.push(y);
+    if (positions.length >= 10) break;
+  }
+  if (!positions.includes(maxY) && positions.length < 10) {
+    positions.push(maxY);
+  }
+  return {
+    originalY: window.scrollY || 0,
+    positions: [...new Set(positions)],
+    title: document.title
+  };
+}
+
+function scrollToCapturePosition(y) {
+  window.scrollTo(0, y);
+  return { y: window.scrollY || y };
+}
+
 async function getActiveTab() {
   const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
   return tabs[0] || null;
 }
 
+async function captureArticleScreenshots(tab) {
+  const planResults = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: articleScrollPlan
+  });
+  const plan = planResults?.[0]?.result || { positions: [0], originalY: 0 };
+  const screenshots = [];
+  const positions = (plan.positions || [0]).slice(0, 10);
+  for (let index = 0; index < positions.length; index += 1) {
+    const y = positions[index];
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: scrollToCapturePosition,
+      args: [y]
+    });
+    await sleep(450);
+    setProgress("capturing", `Capturing article screenshot ${index + 1}/${positions.length} for OCR.`);
+    const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" });
+    screenshots.push({ y, dataUrl });
+  }
+  await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: scrollToCapturePosition,
+    args: [plan.originalY || 0]
+  });
+  return screenshots;
+}
+
 async function getArticlePayload(tab) {
   if (isYoutubeUrl(tab?.url || "")) return null;
-  const results = await chrome.scripting.executeScript({
-    target: { tabId: tab.id },
-    func: extractVisiblePage
-  });
-  const page = results?.[0]?.result || null;
-  if (!page || !page.text || page.text.trim().length < 120) {
-    throw new Error("Could not read enough visible article text from this tab.");
+  let page = null;
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: extractVisiblePage
+    });
+    page = results?.[0]?.result || null;
+  } catch (error) {
+    page = {
+      title: tab.title || "Article",
+      author: "",
+      date: "",
+      excerpt: "",
+      text: "",
+      textLength: 0,
+      extractionError: error.message
+    };
   }
+  if (page?.text && page.text.trim().length >= 800) {
+    page.extractionMethod = "browser-dom";
+    return page;
+  }
+  setProgress("capturing", "Visible article text is limited. Capturing screenshots for OCR.");
+  page = page || { title: tab.title || "Article", author: "", date: "", excerpt: "", text: "", textLength: 0 };
+  page.screenshots = await captureArticleScreenshots(tab);
+  page.extractionMethod = "screenshot-ocr";
   return page;
 }
 

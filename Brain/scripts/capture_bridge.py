@@ -3,13 +3,16 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import subprocess
+import tempfile
 import threading
 import time
 import urllib.parse
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 import capture_current_page as capture
 import auto_ingest
@@ -48,7 +51,74 @@ def article_data_from_payload(payload: dict) -> dict:
         "excerpt": str(page.get("excerpt", "")).strip(),
         "text": str(page.get("text", "")).strip(),
         "browserExtracted": True,
+        "captureWarning": str(page.get("captureWarning", "")).strip(),
     }
+
+
+def data_url_bytes(data_url: str) -> bytes:
+    if "," not in data_url:
+        raise capture.CaptureError("Screenshot payload was not a data URL.")
+    header, encoded = data_url.split(",", 1)
+    if "base64" not in header:
+        raise capture.CaptureError("Screenshot payload was not base64 encoded.")
+    return base64.b64decode(encoded)
+
+
+def ocr_screenshots(screenshots: list[dict]) -> str:
+    if not screenshots:
+        return ""
+    script = capture.ROOT / "scripts" / "ocr_images.swift"
+    with tempfile.TemporaryDirectory(prefix="aibrain-ocr-") as tmp_dir:
+        paths: list[str] = []
+        for index, screenshot in enumerate(screenshots[:10]):
+            data_url = str(screenshot.get("dataUrl", ""))
+            if not data_url:
+                continue
+            path = Path(tmp_dir) / f"capture-{index:02d}.png"
+            path.write_bytes(data_url_bytes(data_url))
+            paths.append(str(path))
+        if not paths:
+            return ""
+        result = subprocess.run(
+            ["/usr/bin/swift", str(script), *paths],
+            cwd=capture.ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=180,
+        )
+    if result.returncode != 0:
+        raise capture.CaptureError(result.stderr.strip() or "Screenshot OCR failed.")
+    lines = []
+    previous = ""
+    for raw_line in result.stdout.splitlines():
+        line = raw_line.strip()
+        if not line or line == previous:
+            continue
+        lines.append(line)
+        previous = line
+    return "\n".join(lines).strip()
+
+
+def article_payload_with_ocr(payload: dict) -> dict:
+    page = dict(payload.get("page") if isinstance(payload.get("page"), dict) else {})
+    text = str(page.get("text", "")).strip()
+    screenshots = page.get("screenshots") if isinstance(page.get("screenshots"), list) else []
+    if len(text) < 800 and screenshots:
+        ocr_text = ocr_screenshots(screenshots)
+        if ocr_text:
+            if text:
+                text = f"{text}\n\n## OCR Extracted Text\n\n{ocr_text}"
+            else:
+                text = ocr_text
+            page["text"] = text
+            page["excerpt"] = str(page.get("excerpt") or ocr_text[:700])
+            page["captureWarning"] = "Article text was extracted from browser screenshots using local OCR."
+    if len(str(page.get("text", "")).strip()) < 120:
+        raise capture.CaptureError("Could not read enough article text from DOM or screenshots.")
+    updated = dict(payload)
+    updated["page"] = page
+    return updated
 
 
 def run_capture_job(job_id: str, payload: dict) -> None:
@@ -62,9 +132,13 @@ def run_capture_job(job_id: str, payload: dict) -> None:
         if is_youtube_url(url):
             set_job(job_id, status="capturing", message="Capturing YouTube transcript. Uncached videos can take a few minutes.")
             path = capture.capture_youtube(url=url)
-        elif isinstance(payload.get("page"), dict) and str(payload["page"].get("text", "")).strip():
-            set_job(job_id, status="capturing", message="Saving visible article text from the browser tab.")
-            path = capture.capture_article(data=article_data_from_payload(payload))
+        elif isinstance(payload.get("page"), dict):
+            if payload["page"].get("screenshots"):
+                set_job(job_id, status="capturing", message="Running local OCR over article screenshots.")
+            else:
+                set_job(job_id, status="capturing", message="Saving visible article text from the browser tab.")
+            article_payload = article_payload_with_ocr(payload)
+            path = capture.capture_article(data=article_data_from_payload(article_payload))
         else:
             set_job(job_id, status="capturing", message="Fetching article page text.")
             path = capture.capture_article(url=url)

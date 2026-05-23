@@ -57,7 +57,9 @@ For YouTube, Transcribe is the primary transcript provider. If no transcript is 
 
 Uncached YouTube videos can take a few minutes while Transcribe resolves and transcribes them. Keep the bridge terminal running until the badge changes to `OK` or `ERR`.
 
-For articles, the extension extracts the visible page text from the browser tab and sends it to the bridge. This is important for logged-in or subscription pages, because Python fetching the URL directly may only see a logged-out shell.
+For articles, the extension first extracts visible page text from the browser tab and sends it to the bridge. This is important for logged-in or subscription pages, because Python fetching the URL directly may only see a logged-out shell.
+
+If browser text extraction is too short, the extension scrolls the active tab and captures up to 10 screenshots. The local bridge runs macOS Vision OCR on those screenshots and saves the extracted text. This mirrors the way browser-native assistants can reason from the rendered page instead of only from fetchable HTML.
 
 After capture, the bridge automatically creates a deterministic Wiki ingest log under `Wiki/Logs/`, adds an Obsidian backlink in the Raw note, rebuilds indexes, and updates the source manifest with covered sources accepted as processed.
 

@@ -902,6 +902,8 @@ Author: {data.get("author", "")}
 
 Published: {data.get("date", "")}
 
+Capture warning: {data.get("captureWarning", "")}
+
 ## Excerpt
 
 {data.get("excerpt", "").strip()}
