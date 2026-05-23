@@ -64,3 +64,9 @@ python3 scripts/audit_public.py
 ```
 
 Fails on obvious secrets, machine-local paths, private keys, and Obsidian plugin/cache state.
+
+```bash
+python3 -m unittest discover -s tests
+```
+
+Runs the unit test suite for deterministic wiki tooling, EPUB import, capture helpers, and auto-ingest graph links.

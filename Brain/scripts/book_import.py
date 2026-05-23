@@ -69,7 +69,7 @@ def elem_text(root: ET.Element, *names: str) -> str:
 
 def rel_or_name(path: Path) -> str:
     try:
-        return path.resolve().relative_to(ROOT).as_posix()
+        return path.resolve().relative_to(ROOT.resolve()).as_posix()
     except ValueError:
         return path.name
 
