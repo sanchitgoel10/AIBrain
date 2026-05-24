@@ -11,4 +11,17 @@ Raw/Files/*
 !Raw/Files/.gitkeep
 Raw/Sources/*
 !Raw/Sources/.gitkeep
+Wiki/**
+!Wiki/
+!Wiki/Topics/
+!Wiki/Topics/.gitkeep
+!Wiki/Concepts/
+!Wiki/Concepts/.gitkeep
+!Wiki/Entities/
+!Wiki/Entities/.gitkeep
+!Wiki/Projects/
+!Wiki/Projects/.gitkeep
+!Wiki/Logs/
+!Wiki/Logs/.gitkeep
 Drafts/
+.aibrain/

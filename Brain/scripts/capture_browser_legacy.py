@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Legacy browser discovery helpers for the old floater/history capture path."""
+"""Legacy browser discovery helpers for CLI history fallback capture."""
 
 from __future__ import annotations
 

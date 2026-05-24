@@ -49,9 +49,13 @@ Open Dia or another Chromium browser, load the unpacked extension from:
 Expected:
 
 - Extension popup shows the `ATB` action.
+- Extension popup has an `Ask` tab.
 - Clicking `ATB` changes status while the capture is running.
 - Success shows a completed/green state.
 - Failure shows an error state with a readable message.
+- The semantic compile counter increases after successful captures.
+- At 10 captures, the popup shows a manual semantic compile reminder.
+- After running manual Codex semantic compile, clicking `Reset` clears the counter.
 
 ## C. YouTube Capture
 
@@ -141,6 +145,7 @@ Expected:
 - Code and schema files may appear as tracked changes.
 - Raw source content under `Brain/Raw/Sources/` should not be staged by default.
 - Binary/private files under `Brain/Raw/Files/` should not be staged by default.
+- Wiki content under `Brain/Wiki/` should not be staged by default except `.gitkeep` placeholders.
 - `.env`, Obsidian workspace files, plugin state, cache, and logs should not be staged.
 
 Before pushing:
@@ -152,3 +157,15 @@ python3 scripts/audit_public.py
 Expected:
 
 - `public audit passed`
+
+## H. Ask My Brain
+
+1. Open the extension popup.
+2. Switch to `Ask`.
+3. Search for a phrase you know exists in a captured source.
+
+Expected:
+
+- Results show matching Raw or Wiki notes.
+- Each result includes a title, path, and snippet.
+- This is shallow local search until the semantic compiler/LLM answer layer is added.

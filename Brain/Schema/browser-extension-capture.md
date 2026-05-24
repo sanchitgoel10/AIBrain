@@ -63,6 +63,10 @@ If browser text extraction is too short, the extension scrolls the active tab an
 
 After capture, the bridge automatically creates a deterministic Wiki ingest log under `Wiki/Logs/`, adds an Obsidian backlink in the Raw note, rebuilds indexes, and updates the source manifest with covered sources accepted as processed.
 
+The extension also tracks how many captures have happened since the last manual semantic compile. At 10 captures, it reminds the user to run Codex semantic compile manually. After the user completes that manual pass, the popup reset button clears the counter.
+
+The `Ask` tab in the popup currently performs shallow local search over Raw and Wiki Markdown through the bridge. It does not call an LLM yet.
+
 ## Why This Replaces The Floater
 
 Dia does not expose the current tab through Chrome's AppleScript API. Reading Dia history or session files can surface stale tabs, so it is not reliable enough for one-click capture. The extension path is the primary path because the browser itself supplies the active tab URL.

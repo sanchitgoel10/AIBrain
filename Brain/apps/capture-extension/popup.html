@@ -10,23 +10,46 @@
       <header class="top">
         <div class="mark">ATB</div>
         <div>
-          <h1>Add to Brain</h1>
+          <h1>AI Brain</h1>
           <p id="kind">Reading active tab</p>
         </div>
       </header>
 
-      <section class="page">
-        <div id="title" class="title">Loading...</div>
-        <div id="url" class="url"></div>
+      <nav class="tabs" aria-label="Mode">
+        <button id="tabAdd" class="tab active" type="button">ATB</button>
+        <button id="tabAsk" class="tab" type="button">Ask</button>
+      </nav>
+
+      <section id="addPanel">
+        <section class="page">
+          <div id="title" class="title">Loading...</div>
+          <div id="url" class="url"></div>
+        </section>
+
+        <section class="progress" aria-label="Capture progress">
+          <div id="progressBar" class="progress-bar idle"></div>
+        </section>
+
+        <p id="status" class="status">Ready.</p>
+
+        <button id="capture" class="primary-action" type="button">Add to Brain</button>
+
+        <section id="compileCard" class="compile-card">
+          <div>
+            <div class="compile-label">Semantic compile</div>
+            <div id="compileStatus" class="compile-status">Checking...</div>
+          </div>
+          <button id="resetCompile" class="secondary-action" type="button">Reset</button>
+        </section>
       </section>
 
-      <section class="progress" aria-label="Capture progress">
-        <div id="progressBar" class="progress-bar idle"></div>
+      <section id="askPanel" class="ask-panel hidden">
+        <form id="askForm" class="ask-form">
+          <input id="askQuery" type="search" placeholder="Ask My Brain" autocomplete="off">
+          <button id="askSubmit" class="primary-action" type="submit">Search</button>
+        </form>
+        <div id="askResults" class="ask-results"></div>
       </section>
-
-      <p id="status" class="status">Ready.</p>
-
-      <button id="capture" type="button">Add to Brain</button>
     </main>
     <script src="popup.js"></script>
   </body>

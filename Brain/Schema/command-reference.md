@@ -70,3 +70,5 @@ python3 -m unittest discover -s tests
 ```
 
 Runs the unit test suite for deterministic wiki tooling, EPUB import, capture helpers, and auto-ingest graph links.
+
+Manual semantic compile instructions live in `Schema/manual-semantic-compile.md`.

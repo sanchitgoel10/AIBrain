@@ -1,15 +1,29 @@
 const BRIDGE_URL = "http://127.0.0.1:8765/capture";
 const STATUS_URL = "http://127.0.0.1:8765/status";
+const BRAIN_STATUS_URL = "http://127.0.0.1:8765/brain-status";
+const SEMANTIC_RESET_URL = "http://127.0.0.1:8765/semantic-reset";
+const ASK_URL = "http://127.0.0.1:8765/ask";
 
 const state = {
   tab: null
 };
 
 const els = {
+  addPanel: document.getElementById("addPanel"),
+  askForm: document.getElementById("askForm"),
+  askPanel: document.getElementById("askPanel"),
+  askQuery: document.getElementById("askQuery"),
+  askResults: document.getElementById("askResults"),
+  askSubmit: document.getElementById("askSubmit"),
+  compileCard: document.getElementById("compileCard"),
+  compileStatus: document.getElementById("compileStatus"),
   capture: document.getElementById("capture"),
   kind: document.getElementById("kind"),
   progress: document.getElementById("progressBar"),
+  resetCompile: document.getElementById("resetCompile"),
   status: document.getElementById("status"),
+  tabAdd: document.getElementById("tabAdd"),
+  tabAsk: document.getElementById("tabAsk"),
   title: document.getElementById("title"),
   url: document.getElementById("url")
 };
@@ -40,6 +54,59 @@ function setProgress(status, message) {
   const [text, color] = badgeMap[status] || ["ATB", "#155EEF"];
   chrome.action.setBadgeText({ text });
   chrome.action.setBadgeBackgroundColor({ color });
+}
+
+function setMode(mode) {
+  const ask = mode === "ask";
+  els.addPanel.classList.toggle("hidden", ask);
+  els.askPanel.classList.toggle("hidden", !ask);
+  els.tabAdd.classList.toggle("active", !ask);
+  els.tabAsk.classList.toggle("active", ask);
+  if (ask) els.askQuery.focus();
+}
+
+function updateBrainStatus(status) {
+  if (!status) return;
+  const count = status.captures_since_compile || 0;
+  const threshold = status.semantic_threshold || 10;
+  els.compileCard.classList.toggle("due", Boolean(status.semantic_due));
+  if (status.semantic_due) {
+    els.compileStatus.textContent = `${count}/${threshold} captures. Run Codex semantic compile.`;
+  } else {
+    els.compileStatus.textContent = `${count}/${threshold} captures since semantic compile.`;
+  }
+}
+
+async function refreshBrainStatus() {
+  try {
+    const response = await fetch(BRAIN_STATUS_URL);
+    const payload = await response.json().catch(() => ({}));
+    if (response.ok && payload.ok) updateBrainStatus(payload.brain_status);
+  } catch (_error) {
+    els.compileStatus.textContent = "Bridge not available.";
+  }
+}
+
+function renderAskResults(results) {
+  if (!results.length) {
+    els.askResults.innerHTML = '<div class="result"><div class="result-title">No matches</div></div>';
+    return;
+  }
+  els.askResults.innerHTML = results.map((result) => `
+    <article class="result">
+      <div class="result-title">${escapeHtml(result.title || result.path || "Result")}</div>
+      <div class="result-path">${escapeHtml(result.path || "")}</div>
+      <div class="result-snippet">${escapeHtml(result.snippet || "")}</div>
+    </article>
+  `).join("");
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
 }
 
 function extractVisiblePage() {
@@ -175,6 +242,7 @@ async function pollJob(jobId) {
     setProgress(job.status, job.message || "AI Brain capture is running.");
     if (job.status === "done") {
       setProgress("done", `Saved ${job.path || "source note"} and linked ${job.ingest_path || "Wiki note"}.`);
+      updateBrainStatus(job.brain_status);
       return;
     }
     if (job.status === "error") {
@@ -182,6 +250,38 @@ async function pollJob(jobId) {
     }
   }
   throw new Error("Capture is still running after 9 minutes. Check the bridge terminal.");
+}
+
+async function resetSemanticCounter() {
+  els.resetCompile.disabled = true;
+  try {
+    const response = await fetch(SEMANTIC_RESET_URL, { method: "POST" });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.ok) throw new Error(payload.error || "Reset failed");
+    updateBrainStatus(payload.brain_status);
+  } catch (_error) {
+    els.compileStatus.textContent = "Could not reset counter.";
+  } finally {
+    els.resetCompile.disabled = false;
+  }
+}
+
+async function askBrain(event) {
+  event.preventDefault();
+  const query = els.askQuery.value.trim();
+  if (!query) return;
+  els.askSubmit.disabled = true;
+  els.askResults.innerHTML = '<div class="result"><div class="result-title">Searching...</div></div>';
+  try {
+    const response = await fetch(`${ASK_URL}?query=${encodeURIComponent(query)}`);
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.ok) throw new Error(payload.error || "Search failed");
+    renderAskResults(payload.results || []);
+  } catch (error) {
+    els.askResults.innerHTML = `<div class="result"><div class="result-title">${escapeHtml(error.message)}</div></div>`;
+  } finally {
+    els.askSubmit.disabled = false;
+  }
 }
 
 async function startCapture() {
@@ -230,7 +330,12 @@ async function init() {
   } else {
     setProgress("queued", "Ready to add this active tab.");
   }
+  await refreshBrainStatus();
 }
 
 els.capture.addEventListener("click", startCapture);
+els.resetCompile.addEventListener("click", resetSemanticCounter);
+els.tabAdd.addEventListener("click", () => setMode("add"));
+els.tabAsk.addEventListener("click", () => setMode("ask"));
+els.askForm.addEventListener("submit", askBrain);
 init();

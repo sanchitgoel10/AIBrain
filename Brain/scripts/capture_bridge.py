@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 import subprocess
 import tempfile
 import threading
@@ -19,6 +20,8 @@ import auto_ingest
 
 HOST = "127.0.0.1"
 PORT = 8765
+SEMANTIC_THRESHOLD = 10
+STATE_FILE = capture.ROOT / ".aibrain" / "capture-state.json"
 JOBS: dict[str, dict] = {}
 JOBS_LOCK = threading.Lock()
 INGEST_LOCK = threading.Lock()
@@ -37,8 +40,106 @@ def get_job(job_id: str) -> dict | None:
         return dict(job) if job else None
 
 
+def load_state() -> dict:
+    if not STATE_FILE.exists():
+        return {"captures_since_compile": 0, "last_compile_reset_at": 0}
+    try:
+        state = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"captures_since_compile": 0, "last_compile_reset_at": 0}
+    return {
+        "captures_since_compile": int(state.get("captures_since_compile", 0) or 0),
+        "last_compile_reset_at": float(state.get("last_compile_reset_at", 0) or 0),
+    }
+
+
+def save_state(state: dict) -> None:
+    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    STATE_FILE.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def increment_capture_counter() -> dict:
+    state = load_state()
+    state["captures_since_compile"] = int(state.get("captures_since_compile", 0)) + 1
+    save_state(state)
+    return brain_status()
+
+
+def reset_capture_counter() -> dict:
+    state = load_state()
+    state["captures_since_compile"] = 0
+    state["last_compile_reset_at"] = time.time()
+    save_state(state)
+    return brain_status()
+
+
+def brain_status() -> dict:
+    state = load_state()
+    count = int(state.get("captures_since_compile", 0))
+    return {
+        "captures_since_compile": count,
+        "semantic_threshold": SEMANTIC_THRESHOLD,
+        "semantic_due": count >= SEMANTIC_THRESHOLD,
+        "remaining_until_due": max(SEMANTIC_THRESHOLD - count, 0),
+        "last_compile_reset_at": state.get("last_compile_reset_at", 0),
+    }
+
+
 def is_youtube_url(url: str) -> bool:
     return "youtube.com/watch" in url or "youtu.be/" in url
+
+
+def clean_snippet(text: str, index: int, *, radius: int = 220) -> str:
+    start = max(index - radius, 0)
+    end = min(index + radius, len(text))
+    snippet = " ".join(text[start:end].split())
+    if start > 0:
+        snippet = f"...{snippet}"
+    if end < len(text):
+        snippet = f"{snippet}..."
+    return snippet
+
+
+def title_from_note(path: Path, text: str) -> str:
+    match = re_title.search(text)
+    if match:
+        return match.group(1).strip()
+    return path.stem.replace("-", " ").title()
+
+
+def search_brain(query: str, *, limit: int = 8) -> list[dict]:
+    query = query.strip().lower()
+    if not query:
+        return []
+    results: list[dict] = []
+    roots = [capture.ROOT / "Wiki", capture.ROOT / "Raw" / "Sources"]
+    for root in roots:
+        if not root.exists():
+            continue
+        for path in sorted(root.rglob("*.md")):
+            if path.name == "index.md":
+                continue
+            try:
+                text = path.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            index = text.lower().find(query)
+            if index == -1:
+                continue
+            results.append(
+                {
+                    "path": path.relative_to(capture.ROOT).as_posix(),
+                    "title": title_from_note(path, text),
+                    "snippet": clean_snippet(text, index),
+                    "kind": "wiki" if "Wiki" in path.relative_to(capture.ROOT).parts else "raw",
+                }
+            )
+            if len(results) >= limit:
+                return results
+    return results
+
+
+re_title = re.compile(r"^#\s+(.+)$", re.MULTILINE)
 
 
 def article_data_from_payload(payload: dict) -> dict:
@@ -167,6 +268,7 @@ def run_capture_job(job_id: str, payload: dict) -> None:
                 check=True,
             )
         capture.run_ingest_command(path)
+        status = increment_capture_counter()
     except (capture.CaptureError, subprocess.CalledProcessError, OSError, ValueError, json.JSONDecodeError) as exc:
         set_job(job_id, status="error", ok=False, error=str(exc), message=str(exc))
         return
@@ -179,6 +281,7 @@ def run_capture_job(job_id: str, payload: dict) -> None:
         path=path.relative_to(capture.ROOT).as_posix(),
         ingest_path=ingest_path.relative_to(capture.ROOT).as_posix(),
         url=url,
+        brain_status=status,
     )
 
 
@@ -209,7 +312,15 @@ class BridgeHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path == "/health":
-            self.send_json(200, {"ok": True, "service": "aibrain-capture-bridge"})
+            self.send_json(200, {"ok": True, "service": "aibrain-capture-bridge", "brain_status": brain_status()})
+            return
+        if parsed.path == "/brain-status":
+            self.send_json(200, {"ok": True, "brain_status": brain_status()})
+            return
+        if parsed.path == "/ask":
+            params = urllib.parse.parse_qs(parsed.query)
+            query = params.get("query", params.get("q", [""]))[0]
+            self.send_json(200, {"ok": True, "query": query, "results": search_brain(query)})
             return
         if parsed.path == "/status":
             params = urllib.parse.parse_qs(parsed.query)
@@ -224,6 +335,9 @@ class BridgeHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         parsed = urllib.parse.urlparse(self.path)
+        if parsed.path == "/semantic-reset":
+            self.send_json(200, {"ok": True, "brain_status": reset_capture_counter()})
+            return
         if parsed.path != "/capture":
             self.send_json(404, {"ok": False, "error": "not found"})
             return
