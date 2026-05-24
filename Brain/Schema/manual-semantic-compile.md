@@ -2,6 +2,14 @@
 
 Use this workflow when the extension says semantic compile is due, or whenever a captured source deserves deeper notes.
 
+## Scheduled Compile
+
+A Codex automation named `AI Brain Semantic Compile` checks this vault daily. It reads `.aibrain/capture-state.json` and only runs deep semantic compile when `captures_since_compile` is 10 or more.
+
+If the count is below 10, it should not modify files.
+
+If compile succeeds and all checks pass, it resets `captures_since_compile` to 0.
+
 ## Prompt For Codex
 
 ```text
@@ -24,6 +32,8 @@ python3 scripts/audit_public.py
 
 4. Open the extension popup.
 5. Click `Reset` in the semantic compile card.
+
+Do not click `Reset` until the semantic compile pass has completed and checks have passed.
 
 ## Result
 
