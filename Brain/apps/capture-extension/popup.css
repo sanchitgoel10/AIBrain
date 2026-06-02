@@ -224,6 +224,11 @@ button:disabled {
   font-size: 12px;
 }
 
+.secondary-full-action {
+  background: #eef1f6;
+  color: #20242d;
+}
+
 .ask-panel.hidden {
   display: none;
 }
