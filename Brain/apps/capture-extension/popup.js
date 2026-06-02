@@ -5,8 +5,6 @@ const SEMANTIC_RESET_URL = "http://127.0.0.1:8765/semantic-reset";
 const ASK_URL = "http://127.0.0.1:8765/ask";
 const OPEN_SOURCE_URL = "http://127.0.0.1:8765/open-source";
 const MAX_ARTICLE_SCREENSHOTS = 30;
-const OBSIDIAN_VAULT = "Brain";
-const OBSIDIAN_URI_LIMIT = 60000;
 
 const state = {
   tab: null
@@ -26,7 +24,6 @@ const els = {
   kind: document.getElementById("kind"),
   progress: document.getElementById("progressBar"),
   resetCompile: document.getElementById("resetCompile"),
-  saveObsidian: document.getElementById("saveObsidian"),
   status: document.getElementById("status"),
   tabAdd: document.getElementById("tabAdd"),
   tabAsk: document.getElementById("tabAsk"),
@@ -131,70 +128,6 @@ function escapeHtml(value) {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
-}
-
-function yamlEscape(value) {
-  return JSON.stringify(String(value || ""));
-}
-
-function slugify(value) {
-  return String(value || "article")
-    .toLowerCase()
-    .replace(/['"]/g, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 90) || "article";
-}
-
-function todayIsoDate() {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function sourceMarkdownFromPage(tab, page) {
-  const title = page?.title || tab?.title || "Article";
-  const author = page?.author || "";
-  const published = page?.date || "";
-  const captured = new Date().toISOString();
-  const url = tab?.url || "";
-  const summary = page?.excerpt || "";
-  const content = page?.text || "";
-  return `---
-Title: ${yamlEscape(title)}
-Author: ${yamlEscape(author)}
-Reference: ${yamlEscape(url)}
-ContentType:
-  - "article"
-Created: ${todayIsoDate()}
-Processed: false
-tags:
-  - "source"
----
-
-# ${title}
-
-Source type: Article
-URL: ${url}
-Author: ${author}
-Published: ${published}
-Captured: ${captured}
-
-## Summary
-
-${summary}
-
-## Article Text
-
-${content}
-`;
-}
-
-function obsidianNewUri(path, content) {
-  const params = new URLSearchParams({
-    vault: OBSIDIAN_VAULT,
-    file: path,
-    content
-  });
-  return `obsidian://new?${params.toString()}`;
 }
 
 function extractVisiblePage() {
@@ -430,37 +363,6 @@ async function startCapture() {
   }
 }
 
-async function saveToObsidian() {
-  const tab = state.tab;
-  if (!isCaptureUrl(tab?.url || "")) {
-    setProgress("error", "Open an article tab first.");
-    return;
-  }
-  if (isYoutubeUrl(tab.url)) {
-    setProgress("error", "Use Add to Brain for YouTube transcripts.");
-    return;
-  }
-
-  els.saveObsidian.disabled = true;
-  try {
-    setProgress("capturing", "Reading article for Obsidian URI save.");
-    const page = await getArticlePayload(tab);
-    const title = page?.title || tab.title || "Article";
-    const path = `Raw/Sources/${slugify(title)}`;
-    const content = sourceMarkdownFromPage(tab, page);
-    const uri = obsidianNewUri(path, content);
-    if (uri.length > OBSIDIAN_URI_LIMIT) {
-      throw new Error("Article is too large for obsidian:// URI save. Use Add to Brain.");
-    }
-    await chrome.tabs.create({ url: uri, active: false });
-    setProgress("done", `Opened Obsidian save link for ${path}.`);
-  } catch (error) {
-    setProgress("error", error.message || "Could not save to Obsidian.");
-  } finally {
-    els.saveObsidian.disabled = false;
-  }
-}
-
 async function init() {
   chrome.action.setBadgeText({ text: "ATB" });
   chrome.action.setBadgeBackgroundColor({ color: "#155EEF" });
@@ -480,7 +382,6 @@ async function init() {
 
 els.capture.addEventListener("click", startCapture);
 els.resetCompile.addEventListener("click", resetSemanticCounter);
-els.saveObsidian.addEventListener("click", saveToObsidian);
 els.tabAdd.addEventListener("click", () => setMode("add"));
 els.tabAsk.addEventListener("click", () => setMode("ask"));
 els.askForm.addEventListener("submit", askBrain);
