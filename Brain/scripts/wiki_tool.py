@@ -12,12 +12,16 @@ import subprocess
 import sys
 from pathlib import Path
 
+import brain_ask
+from capture_common import load_dotenv
+
 ROOT = Path(__file__).resolve().parents[1]
 RAW = ROOT / "Raw" / "Sources"
 WIKI = ROOT / "Wiki"
 SCHEMA = ROOT / "Schema"
 CATALOG = WIKI / "catalog.jsonl"
 MANIFEST = SCHEMA / "source-manifest.jsonl"
+CAPTURE_STATE = ROOT / ".aibrain" / "capture-state.json"
 ALLOWED_TAGS = {"topic", "concept", "entity", "project", "log"}
 WIKI_FOLDERS = ["Topics", "Concepts", "Entities", "Projects", "Logs"]
 REQUIRED_FOLDERS = [
@@ -146,6 +150,36 @@ def write_jsonl(path: Path, rows: list[dict]) -> None:
     )
 
 
+def yaml_value(value: object) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, list):
+        return "[]"
+    return json.dumps(str(value), ensure_ascii=False)
+
+
+def format_frontmatter(frontmatter: dict) -> str:
+    lines = ["---"]
+    for key, value in frontmatter.items():
+        if isinstance(value, list):
+            if value:
+                lines.append(f"{key}:")
+                for item in value:
+                    lines.append(f"  - {json.dumps(str(item), ensure_ascii=False)}")
+            else:
+                lines.append(f"{key}: []")
+        else:
+            lines.append(f"{key}: {yaml_value(value)}")
+    lines.append("---")
+    return "\n".join(lines) + "\n"
+
+
+def write_note(path: Path, frontmatter: dict, body: str) -> None:
+    path.write_text(format_frontmatter(frontmatter) + "\n" + body.lstrip("\n"), encoding="utf-8")
+
+
 def read_jsonl(path: Path) -> list[dict]:
     if not path.exists():
         return []
@@ -154,6 +188,20 @@ def read_jsonl(path: Path) -> list[dict]:
         if line.strip():
             rows.append(json.loads(line))
     return rows
+
+
+def reset_capture_counter() -> dict:
+    state: dict = {}
+    if CAPTURE_STATE.exists():
+        try:
+            state = json.loads(CAPTURE_STATE.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            state = {}
+    state["captures_since_compile"] = 0
+    state["last_compile_reset_at"] = dt.datetime.now().timestamp()
+    CAPTURE_STATE.parent.mkdir(parents=True, exist_ok=True)
+    CAPTURE_STATE.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return state
 
 
 def build_indexes(rows: list[dict]) -> None:
@@ -321,6 +369,12 @@ def cmd_source_coverage(_args) -> int:
     return 0
 
 
+def cmd_reset_capture_counter(_args) -> int:
+    state = reset_capture_counter()
+    print(json.dumps(state, sort_keys=True))
+    return 0
+
+
 def cmd_search_catalog(args) -> int:
     query = args.query.lower()
     matches = []
@@ -339,6 +393,80 @@ def cmd_search_catalog(args) -> int:
         print(json.dumps(row, sort_keys=True))
     if not matches:
         print("no matches")
+    return 0
+
+
+def tokens(text: str) -> set[str]:
+    stop = {
+        "a",
+        "an",
+        "and",
+        "are",
+        "as",
+        "at",
+        "be",
+        "by",
+        "for",
+        "from",
+        "how",
+        "i",
+        "in",
+        "is",
+        "it",
+        "of",
+        "on",
+        "or",
+        "that",
+        "the",
+        "this",
+        "to",
+        "was",
+        "what",
+        "which",
+        "with",
+    }
+    return {token for token in re.findall(r"[a-z0-9][a-z0-9-]+", text.lower()) if token not in stop}
+
+
+def note_excerpt(body: str, query_tokens: set[str], max_chars: int = 240) -> str:
+    body = re.sub(r"\s+", " ", body).strip()
+    if not body:
+        return ""
+    sentences = re.split(r"(?<=[.!?])\s+", body)
+    best = max(
+        sentences,
+        key=lambda sentence: len(tokens(sentence) & query_tokens),
+        default=body[:max_chars],
+    )
+    if len(best) <= max_chars:
+        return best
+    return best[: max_chars - 1].rstrip() + "..."
+
+
+def ask_matches(query: str, limit: int = 5) -> list[dict]:
+    results = brain_ask.search(query, root=ROOT, limit=limit)
+    matches = []
+    for result in results:
+        matches.append(
+            {
+                "path": result.get("path", ""),
+                "title": result.get("title", ""),
+                "tag": result.get("kind", ""),
+                "sources": [],
+                "score": result.get("score", 0),
+                "matched_terms": sorted(tokens(query)),
+                "excerpt": result.get("snippet", ""),
+            }
+        )
+    return matches
+
+
+def cmd_ask(args) -> int:
+    payload = brain_ask.answer(args.query, root=ROOT, limit=args.limit)
+    if not payload["results"]:
+        print("no brain matches")
+        return 0
+    print(json.dumps(payload, sort_keys=True))
     return 0
 
 
@@ -405,6 +533,118 @@ def cmd_import_epub(args) -> int:
     return 0
 
 
+def source_rel_from_arg(source: str) -> str:
+    path = Path(source)
+    if path.is_absolute():
+        try:
+            return path.relative_to(ROOT).as_posix()
+        except ValueError as exc:
+            raise ValueError(f"source must be inside this vault: {source}") from exc
+    value = path.as_posix()
+    if value.startswith("Raw/Sources/"):
+        return value
+    return f"Raw/Sources/{path.name}"
+
+
+def purge_plan(source: str) -> dict:
+    source_rel = source_rel_from_arg(source)
+    source_path = ROOT / source_rel
+    if not source_rel.startswith("Raw/Sources/"):
+        raise ValueError("source must be under Raw/Sources")
+    delete_notes: list[str] = []
+    update_notes: list[dict] = []
+    for path in wiki_note_paths():
+        fm, body = read_frontmatter(path)
+        sources = fm.get("sources", [])
+        if not isinstance(sources, list) or source_rel not in sources:
+            continue
+        remaining = [item for item in sources if item != source_rel]
+        if remaining:
+            update_notes.append(
+                {
+                    "path": rel(path),
+                    "remaining_sources": remaining,
+                    "source_count": len(remaining),
+                }
+            )
+        else:
+            delete_notes.append(rel(path))
+    return {
+        "source": source_rel,
+        "source_exists": source_path.exists(),
+        "delete_source": source_path.exists(),
+        "delete_notes": sorted(delete_notes),
+        "update_notes": sorted(update_notes, key=lambda item: item["path"]),
+    }
+
+
+def remove_source_links_from_body(body: str, source_stem: str, deleted_note_stems: set[str]) -> str:
+    lines = []
+    stems = {source_stem, *deleted_note_stems}
+    for line in body.splitlines():
+        stripped = line.lstrip()
+        is_list_line = stripped.startswith(("- ", "* "))
+        if is_list_line and any(f"[[{stem}" in line for stem in stems):
+            continue
+        for stem in stems:
+            line = re.sub(rf"\s*(?:and\s+)?\[\[{re.escape(stem)}(?:#[^\]|]+)?(?:\|[^\]]+)?\]\]", "", line)
+        lines.append(line)
+    return "\n".join(lines).strip() + "\n"
+
+
+def apply_purge(plan: dict) -> None:
+    source_rel = plan["source"]
+    source_path = ROOT / source_rel
+    source_stem = source_path.stem
+    deleted_note_stems = {Path(path).stem for path in plan["delete_notes"]}
+
+    for note_rel in plan["delete_notes"]:
+        note_path = ROOT / note_rel
+        if note_path.exists():
+            note_path.unlink()
+
+    for item in plan["update_notes"]:
+        note_path = ROOT / item["path"]
+        fm, body = read_frontmatter(note_path)
+        fm["sources"] = item["remaining_sources"]
+        fm["source_count"] = item["source_count"]
+        fm["updated"] = today()
+        write_note(note_path, fm, remove_source_links_from_body(body, source_stem, deleted_note_stems))
+
+    for path in list(wiki_note_paths()) + [WIKI / "index.md"]:
+        if not path.exists():
+            continue
+        fm, body = read_frontmatter(path)
+        new_body = remove_source_links_from_body(body, source_stem, deleted_note_stems)
+        if new_body != body:
+            if fm:
+                write_note(path, fm, new_body)
+            else:
+                path.write_text(new_body, encoding="utf-8")
+
+    if source_path.exists():
+        source_path.unlink()
+
+
+def cmd_purge_source(args) -> int:
+    try:
+        plan = purge_plan(args.source)
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    print(json.dumps(plan, indent=2, sort_keys=True))
+    if not args.apply:
+        print("dry run only; rerun with --apply to delete/update these files")
+        return 0
+    apply_purge(plan)
+    cmd_build(argparse.Namespace())
+    cmd_source_scan(argparse.Namespace(update=True, accept_covered=True))
+    result = cmd_source_lint(argparse.Namespace())
+    if result == 0:
+        print(f"purged {plan['source']}")
+    return result
+
+
 def fail(errors: list[str], ok_message: str = "doctor passed") -> int:
     if errors:
         for error in errors:
@@ -415,6 +655,7 @@ def fail(errors: list[str], ok_message: str = "doctor passed") -> int:
 
 
 def main() -> int:
+    load_dotenv()
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("doctor").set_defaults(func=cmd_doctor)
@@ -427,9 +668,14 @@ def main() -> int:
     sub.add_parser("source-lint").set_defaults(func=cmd_source_lint)
     sub.add_parser("source-delta").set_defaults(func=cmd_source_delta)
     sub.add_parser("source-coverage").set_defaults(func=cmd_source_coverage)
+    sub.add_parser("reset-capture-counter").set_defaults(func=cmd_reset_capture_counter)
     search = sub.add_parser("search-catalog")
     search.add_argument("--query", required=True)
     search.set_defaults(func=cmd_search_catalog)
+    ask = sub.add_parser("ask")
+    ask.add_argument("--query", required=True)
+    ask.add_argument("--limit", type=int, default=5)
+    ask.set_defaults(func=cmd_ask)
     log = sub.add_parser("log")
     log.add_argument("--title", required=True)
     log.add_argument("--details", required=True)
@@ -442,6 +688,10 @@ def main() -> int:
     epub.add_argument("--dry-run", action="store_true", help="Print the generated Raw source note without writing it.")
     epub.add_argument("--ingest", action="store_true", help="Create a linked Wiki ingest note and update indexes.")
     epub.set_defaults(func=cmd_import_epub)
+    purge = sub.add_parser("purge-source")
+    purge.add_argument("source", help="Raw source path or filename to remove from the brain.")
+    purge.add_argument("--apply", action="store_true", help="Actually delete/update files. Without this, only prints the plan.")
+    purge.set_defaults(func=cmd_purge_source)
     args = parser.parse_args()
     return args.func(args)
 

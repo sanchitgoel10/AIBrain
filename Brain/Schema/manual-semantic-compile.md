@@ -4,11 +4,11 @@ Use this workflow when the extension says semantic compile is due, or whenever a
 
 ## Scheduled Compile
 
-A Codex automation named `AI Brain Semantic Compile` checks this vault daily. It reads `.aibrain/capture-state.json` and only runs deep semantic compile when `captures_since_compile` is 10 or more.
+A Codex automation named `AI Brain Semantic Compile` runs this vault daily. It reads `.aibrain/capture-state.json`, reports `captures_since_compile`, and runs the deep semantic compile workflow regardless of the counter value.
 
-If the count is below 10, it should not modify files.
+The counter is a reminder/manual-run signal, not a scheduled automation gate. If the count reaches 10, it means there is enough new capture volume to consider running a manual semantic compile before the next scheduled run.
 
-If compile succeeds and all checks pass, it resets `captures_since_compile` to 0.
+If compile succeeds and all checks pass, the automation resets `captures_since_compile` to 0.
 
 ## Prompt For Codex
 
@@ -28,12 +28,10 @@ python3 scripts/wiki_tool.py source-scan --update --accept-covered
 python3 scripts/wiki_tool.py lint
 python3 scripts/wiki_tool.py source-lint
 python3 scripts/audit_public.py
+python3 scripts/wiki_tool.py reset-capture-counter
 ```
 
-4. Open the extension popup.
-5. Click `Reset` in the semantic compile card.
-
-Do not click `Reset` until the semantic compile pass has completed and checks have passed.
+Do not reset the counter until the semantic compile pass has completed and checks have passed.
 
 ## Result
 

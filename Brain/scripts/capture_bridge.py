@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import base64
 import json
-import re
 import subprocess
 import tempfile
 import threading
@@ -17,10 +16,14 @@ from pathlib import Path
 
 import capture_current_page as capture
 import auto_ingest
+import brain_ask
 
 HOST = "127.0.0.1"
 PORT = 8765
 SEMANTIC_THRESHOLD = 10
+RECENT_JOB_TTL_SECONDS = 60 * 60
+RUNNING_JOB_TIMEOUT_SECONDS = 4 * 60
+MAX_OCR_SCREENSHOTS = 30
 STATE_FILE = capture.ROOT / ".aibrain" / "capture-state.json"
 JOBS: dict[str, dict] = {}
 JOBS_LOCK = threading.Lock()
@@ -30,6 +33,8 @@ INGEST_LOCK = threading.Lock()
 def set_job(job_id: str, **updates: object) -> None:
     with JOBS_LOCK:
         job = JOBS.setdefault(job_id, {})
+        if job.get("timed_out") and updates.get("status") != "error":
+            return
         job.update(updates)
         job["updated_at"] = time.time()
 
@@ -37,7 +42,45 @@ def set_job(job_id: str, **updates: object) -> None:
 def get_job(job_id: str) -> dict | None:
     with JOBS_LOCK:
         job = JOBS.get(job_id)
+        if job and is_timed_out(job):
+            mark_job_timed_out(job)
         return dict(job) if job else None
+
+
+def recent_job_for_url(url: str) -> tuple[str, dict] | None:
+    cutoff = time.time() - RECENT_JOB_TTL_SECONDS
+    with JOBS_LOCK:
+        matches = [
+            (job_id, job)
+            for job_id, job in JOBS.items()
+            if job.get("url") == url and float(job.get("updated_at", job.get("created_at", 0)) or 0) >= cutoff
+        ]
+        if not matches:
+            return None
+        job_id, job = max(matches, key=lambda item: float(item[1].get("updated_at", item[1].get("created_at", 0)) or 0))
+        if is_timed_out(job):
+            mark_job_timed_out(job)
+        result = dict(job)
+        result["job_id"] = job_id
+        return job_id, result
+
+
+def is_running_job(job: dict) -> bool:
+    return job.get("status") in {"queued", "capturing", "ingesting", "maintenance"}
+
+
+def is_timed_out(job: dict) -> bool:
+    started = float(job.get("created_at", 0) or 0)
+    return is_running_job(job) and started > 0 and time.time() - started > RUNNING_JOB_TIMEOUT_SECONDS
+
+
+def mark_job_timed_out(job: dict) -> None:
+    job["status"] = "error"
+    job["ok"] = False
+    job["timed_out"] = True
+    job["error"] = "Capture timed out. Try again; the transcript provider may be slow or unavailable."
+    job["message"] = job["error"]
+    job["updated_at"] = time.time()
 
 
 def load_state() -> dict:
@@ -89,57 +132,36 @@ def is_youtube_url(url: str) -> bool:
     return "youtube.com/watch" in url or "youtu.be/" in url
 
 
-def clean_snippet(text: str, index: int, *, radius: int = 220) -> str:
-    start = max(index - radius, 0)
-    end = min(index + radius, len(text))
-    snippet = " ".join(text[start:end].split())
-    if start > 0:
-        snippet = f"...{snippet}"
-    if end < len(text):
-        snippet = f"{snippet}..."
-    return snippet
-
-
-def title_from_note(path: Path, text: str) -> str:
-    match = re_title.search(text)
-    if match:
-        return match.group(1).strip()
-    return path.stem.replace("-", " ").title()
-
-
 def search_brain(query: str, *, limit: int = 8) -> list[dict]:
-    query = query.strip().lower()
-    if not query:
-        return []
-    results: list[dict] = []
-    roots = [capture.ROOT / "Wiki", capture.ROOT / "Raw" / "Sources"]
-    for root in roots:
-        if not root.exists():
-            continue
-        for path in sorted(root.rglob("*.md")):
-            if path.name == "index.md":
-                continue
-            try:
-                text = path.read_text(encoding="utf-8")
-            except OSError:
-                continue
-            index = text.lower().find(query)
-            if index == -1:
-                continue
-            results.append(
-                {
-                    "path": path.relative_to(capture.ROOT).as_posix(),
-                    "title": title_from_note(path, text),
-                    "snippet": clean_snippet(text, index),
-                    "kind": "wiki" if "Wiki" in path.relative_to(capture.ROOT).parts else "raw",
-                }
-            )
-            if len(results) >= limit:
-                return results
-    return results
+    return brain_ask.search(query, root=capture.ROOT, limit=limit)
 
 
-re_title = re.compile(r"^#\s+(.+)$", re.MULTILINE)
+def ask_brain(query: str, *, limit: int = 5) -> dict:
+    return brain_ask.answer(query, root=capture.ROOT, limit=limit)
+
+
+def brain_path_from_request(path_value: str) -> Path:
+    if not path_value.strip():
+        raise capture.CaptureError("Source path is required.")
+    raw_path = Path(path_value)
+    if raw_path.is_absolute():
+        raise capture.CaptureError("Source path must be relative to the Brain vault.")
+    root = capture.ROOT.resolve()
+    target = (root / raw_path).resolve()
+    try:
+        target.relative_to(root)
+    except ValueError as exc:
+        raise capture.CaptureError("Source path is outside the Brain vault.") from exc
+    if not target.exists():
+        raise capture.CaptureError(f"Source path does not exist: {path_value}")
+    return target
+
+
+def reveal_brain_path(path_value: str) -> dict:
+    target = brain_path_from_request(path_value)
+    args = ["open", str(target)] if target.is_dir() else ["open", "-R", str(target)]
+    subprocess.Popen(args, cwd=capture.ROOT)
+    return {"path": target.relative_to(capture.ROOT).as_posix()}
 
 
 def article_data_from_payload(payload: dict) -> dict:
@@ -172,7 +194,7 @@ def ocr_screenshots(screenshots: list[dict]) -> str:
     script = capture.ROOT / "scripts" / "ocr_images.swift"
     with tempfile.TemporaryDirectory(prefix="aibrain-ocr-") as tmp_dir:
         paths: list[str] = []
-        for index, screenshot in enumerate(screenshots[:10]):
+        for index, screenshot in enumerate(screenshots[:MAX_OCR_SCREENSHOTS]):
             data_url = str(screenshot.get("dataUrl", ""))
             if not data_url:
                 continue
@@ -206,7 +228,12 @@ def article_payload_with_ocr(payload: dict) -> dict:
     page = dict(payload.get("page") if isinstance(payload.get("page"), dict) else {})
     text = str(page.get("text", "")).strip()
     screenshots = page.get("screenshots") if isinstance(page.get("screenshots"), list) else []
-    if len(text) < 800 and screenshots:
+    force_ocr = bool(page.get("forceOcr") or page.get("extractionMethod") == "screenshot-ocr")
+    discard_dom_text = bool(page.get("discardDomTextForOcr"))
+    if discard_dom_text:
+        text = ""
+        page["text"] = ""
+    if (force_ocr or len(text) < 800) and screenshots:
         ocr_text = ocr_screenshots(screenshots)
         if ocr_text:
             if text:
@@ -215,7 +242,12 @@ def article_payload_with_ocr(payload: dict) -> dict:
                 text = ocr_text
             page["text"] = text
             page["excerpt"] = str(page.get("excerpt") or ocr_text[:700])
-            page["captureWarning"] = "Article text was extracted from browser screenshots using local OCR."
+            if discard_dom_text:
+                page["captureWarning"] = "Article text was extracted from browser screenshots because the page DOM looked stale or mismatched."
+            elif force_ocr:
+                page["captureWarning"] = "Article text includes browser screenshot OCR because the page DOM looked incomplete."
+            else:
+                page["captureWarning"] = "Article text was extracted from browser screenshots using local OCR."
     if len(str(page.get("text", "")).strip()) < 120:
         raise capture.CaptureError("Could not read enough article text from DOM or screenshots.")
     updated = dict(payload)
@@ -320,7 +352,22 @@ class BridgeHandler(BaseHTTPRequestHandler):
         if parsed.path == "/ask":
             params = urllib.parse.parse_qs(parsed.query)
             query = params.get("query", params.get("q", [""]))[0]
-            self.send_json(200, {"ok": True, "query": query, "results": search_brain(query)})
+            try:
+                limit = int(params.get("limit", ["5"])[0] or 5)
+            except ValueError:
+                limit = 5
+            answer = ask_brain(query, limit=limit)
+            self.send_json(200, {"ok": True, **answer})
+            return
+        if parsed.path == "/open-source":
+            params = urllib.parse.parse_qs(parsed.query)
+            path_value = params.get("path", [""])[0]
+            try:
+                opened = reveal_brain_path(path_value)
+            except (capture.CaptureError, OSError) as exc:
+                self.send_json(400, {"ok": False, "error": str(exc)})
+                return
+            self.send_json(200, {"ok": True, **opened})
             return
         if parsed.path == "/status":
             params = urllib.parse.parse_qs(parsed.query)
@@ -330,6 +377,16 @@ class BridgeHandler(BaseHTTPRequestHandler):
                 self.send_json(404, {"ok": False, "error": "unknown job"})
                 return
             self.send_json(200, {"ok": True, "job": job})
+            return
+        if parsed.path == "/recent-status":
+            params = urllib.parse.parse_qs(parsed.query)
+            url = params.get("url", [""])[0]
+            match = recent_job_for_url(url)
+            if not match:
+                self.send_json(200, {"ok": True, "job": None})
+                return
+            job_id, job = match
+            self.send_json(200, {"ok": True, "job_id": job_id, "job": job})
             return
         self.send_json(404, {"ok": False, "error": "not found"})
 
@@ -349,6 +406,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
             url = str(payload.get("url", "")).strip()
             if not url:
                 raise capture.CaptureError("The extension did not send a URL.")
+            title = str(payload.get("title", "")).strip()
         except (capture.CaptureError, subprocess.CalledProcessError, OSError, json.JSONDecodeError) as exc:
             self.send_json(400, {"ok": False, "error": str(exc)})
             return
@@ -360,6 +418,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
             status="queued",
             message="Capture queued.",
             url=url,
+            title=title,
             created_at=time.time(),
         )
         thread = threading.Thread(target=run_capture_job, args=(job_id, payload), daemon=True)

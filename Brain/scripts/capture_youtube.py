@@ -22,6 +22,8 @@ from capture_common import (
 )
 
 USETRANSCRIBE_BASE_URL = "https://www.usetranscribe.io"
+USETRANSCRIBE_REQUEST_TIMEOUT_SECONDS = int(os.environ.get("USETRANSCRIBE_REQUEST_TIMEOUT_SECONDS", "30"))
+USETRANSCRIBE_STREAM_TIMEOUT_SECONDS = int(os.environ.get("USETRANSCRIBE_STREAM_TIMEOUT_SECONDS", "180"))
 
 YOUTUBE_JS = r"""
 (() => {
@@ -141,7 +143,7 @@ def usetranscribe_base_url() -> str:
     return os.environ.get("USETRANSCRIBE_BASE_URL", USETRANSCRIBE_BASE_URL).rstrip("/")
 
 
-def request_json(url: str, *, timeout: int = 60) -> dict:
+def request_json(url: str, *, timeout: int = USETRANSCRIBE_REQUEST_TIMEOUT_SECONDS) -> dict:
     request = urllib.request.Request(
         url,
         headers={
@@ -261,7 +263,7 @@ def fetch_usetranscribe_sse(url: str) -> dict:
         return None
 
     try:
-        with urllib.request.urlopen(request, timeout=660) as response:
+        with urllib.request.urlopen(request, timeout=USETRANSCRIBE_STREAM_TIMEOUT_SECONDS) as response:
             for raw_line in response:
                 line = raw_line.decode("utf-8", errors="replace").rstrip("\n")
                 if not line.strip():

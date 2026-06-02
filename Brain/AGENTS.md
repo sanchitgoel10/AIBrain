@@ -22,6 +22,20 @@ This vault is an LLM Wiki. Treat it as a layered knowledge system, not as a gene
 8. Run `python3 scripts/wiki_tool.py build`, `python3 scripts/wiki_tool.py lint`, and `python3 scripts/wiki_tool.py source-lint` before meaningful commits.
 9. Do not invent citations, sources, or unsupported claims.
 
+## Ask My Brain
+
+When the user starts a message with `/ask`, says "question for brain", "ask brain", or asks for knowledge captured in this vault, answer from the LLM Wiki before using general model memory.
+
+Use this flow:
+
+```bash
+python3 scripts/wiki_tool.py ask --query "user question"
+```
+
+This command uses the local Ask My Brain engine: deterministic SQLite FTS retrieval first, then a local Ollama model when available for query understanding, reranking, and answer synthesis. Then open the cited/highest scoring compiled Wiki notes. Open Raw sources only when the compiled notes are insufficient or the user asks for source-level verification. Cite the Wiki note and Raw source used. If the vault does not contain an answer, say that plainly.
+
+For `/ask`, do not browse the web unless the user explicitly asks for web/current/latest verification or approves looking outside the vault after the brain has no relevant answer.
+
 ## Commit Gate
 
 Before committing meaningful changes, run:

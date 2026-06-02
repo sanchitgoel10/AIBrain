@@ -27,6 +27,7 @@ class WikiToolTests(unittest.TestCase):
             "SCHEMA": wiki_tool.SCHEMA,
             "CATALOG": wiki_tool.CATALOG,
             "MANIFEST": wiki_tool.MANIFEST,
+            "CAPTURE_STATE": wiki_tool.CAPTURE_STATE,
         }
         wiki_tool.ROOT = self.root
         wiki_tool.RAW = self.root / "Raw" / "Sources"
@@ -34,6 +35,7 @@ class WikiToolTests(unittest.TestCase):
         wiki_tool.SCHEMA = self.root / "Schema"
         wiki_tool.CATALOG = wiki_tool.WIKI / "catalog.jsonl"
         wiki_tool.MANIFEST = wiki_tool.SCHEMA / "source-manifest.jsonl"
+        wiki_tool.CAPTURE_STATE = self.root / ".aibrain" / "capture-state.json"
         self.addCleanup(self.restore_globals)
         for folder in ["Raw/Sources", "Wiki/Concepts", "Wiki/Topics", "Wiki/Entities", "Wiki/Projects", "Wiki/Logs", "Schema"]:
             (self.root / folder).mkdir(parents=True, exist_ok=True)
@@ -87,6 +89,30 @@ Compiled claim.
         )
         return path
 
+    def write_multi_source_wiki_note(self) -> Path:
+        path = wiki_tool.WIKI / "Topics" / "multi-topic.md"
+        path.write_text(
+            """---
+tags:
+  - "topic"
+topics: []
+status: seed
+created: 2026-05-24
+updated: 2026-05-24
+sources:
+  - "Raw/Sources/source.md"
+  - "Raw/Sources/other.md"
+source_count: 2
+aliases: []
+---
+# Multi Topic
+
+Uses [[source|Source]] and [[other|Other]].
+""",
+            encoding="utf-8",
+        )
+        return path
+
     def test_build_creates_catalog_and_indexes(self) -> None:
         self.write_source()
         self.write_wiki_note()
@@ -129,6 +155,86 @@ Compiled claim.
             result = wiki_tool.cmd_source_lint(argparse.Namespace())
 
         self.assertEqual(result, 1)
+
+    def test_ask_returns_relevant_compiled_note(self) -> None:
+        self.write_source()
+        self.write_wiki_note()
+        with contextlib.redirect_stdout(io.StringIO()):
+            wiki_tool.cmd_build(argparse.Namespace())
+
+        matches = wiki_tool.ask_matches("compiled claim", limit=3)
+
+        self.assertEqual(matches[0]["path"], "Wiki/Concepts/test-concept.md")
+        self.assertIn("Compiled claim", matches[0]["excerpt"])
+
+    def test_ask_command_prints_no_matches_when_empty(self) -> None:
+        self.write_source()
+
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            result = wiki_tool.cmd_ask(argparse.Namespace(query="not present", limit=3))
+
+        self.assertEqual(result, 0)
+        self.assertEqual(stdout.getvalue().strip(), "no brain matches")
+
+    def test_purge_plan_finds_single_and_multi_source_notes(self) -> None:
+        self.write_source()
+        self.write_wiki_note()
+        self.write_multi_source_wiki_note()
+
+        plan = wiki_tool.purge_plan("source.md")
+
+        self.assertTrue(plan["delete_source"])
+        self.assertEqual(plan["delete_notes"], ["Wiki/Concepts/test-concept.md"])
+        self.assertEqual(plan["update_notes"][0]["path"], "Wiki/Topics/multi-topic.md")
+        self.assertEqual(plan["update_notes"][0]["remaining_sources"], ["Raw/Sources/other.md"])
+
+    def test_apply_purge_deletes_source_and_updates_multi_source_note(self) -> None:
+        self.write_source()
+        self.write_wiki_note()
+        multi = self.write_multi_source_wiki_note()
+        other = wiki_tool.RAW / "other.md"
+        other.write_text(
+            """---
+Title: "Other"
+Author: "Author"
+Reference: "owned-test"
+ContentType:
+  - "markdown"
+Created: 2026-05-24
+Processed: true
+tags:
+  - "source"
+---
+# Other
+""",
+            encoding="utf-8",
+        )
+
+        plan = wiki_tool.purge_plan("Raw/Sources/source.md")
+        wiki_tool.apply_purge(plan)
+
+        self.assertFalse((wiki_tool.RAW / "source.md").exists())
+        self.assertFalse((wiki_tool.WIKI / "Concepts" / "test-concept.md").exists())
+        fm, body = wiki_tool.read_frontmatter(multi)
+        self.assertEqual(fm["sources"], ["Raw/Sources/other.md"])
+        self.assertEqual(fm["source_count"], 1)
+        self.assertNotIn("[[source", body)
+        self.assertIn("[[other", body)
+
+    def test_reset_capture_counter_sets_count_to_zero(self) -> None:
+        wiki_tool.CAPTURE_STATE.parent.mkdir(parents=True)
+        wiki_tool.CAPTURE_STATE.write_text(
+            json.dumps({"captures_since_compile": 12, "last_compile_reset_at": 1}) + "\n",
+            encoding="utf-8",
+        )
+
+        state = wiki_tool.reset_capture_counter()
+
+        self.assertEqual(state["captures_since_compile"], 0)
+        self.assertGreater(state["last_compile_reset_at"], 1)
+        saved = json.loads(wiki_tool.CAPTURE_STATE.read_text(encoding="utf-8"))
+        self.assertEqual(saved["captures_since_compile"], 0)
 
 
 if __name__ == "__main__":

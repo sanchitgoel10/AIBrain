@@ -41,10 +41,22 @@ python3 scripts/wiki_tool.py source-coverage
 Shows manifest deltas and Raw-source coverage by compiled Wiki notes.
 
 ```bash
+python3 scripts/wiki_tool.py reset-capture-counter
+```
+
+Resets `.aibrain/capture-state.json` so `captures_since_compile` is `0`. Use after a successful semantic compile pass.
+
+```bash
 python3 scripts/wiki_tool.py search-catalog --query "llm wiki"
 ```
 
 Searches compiled notes through the catalog.
+
+```bash
+python3 scripts/wiki_tool.py ask --query "which company was the secretive trading one?"
+```
+
+Answers a brain question through the local Ask My Brain engine. It uses deterministic SQLite FTS retrieval first, then one hosted OpenAI-compatible model call when configured to synthesize an answer from retrieved evidence. If no hosted model is configured, it still returns source matches.
 
 ```bash
 python3 scripts/wiki_tool.py log --title "title" --details "details"
@@ -58,6 +70,13 @@ python3 scripts/wiki_tool.py import-epub Raw/Files/book.epub --ingest
 ```
 
 Extracts an EPUB book into a Markdown source note under `Raw/Sources/`. With `--ingest`, also creates the linked Wiki ingest note, rebuilds indexes, updates the source manifest, and runs source lint. Keep the original `.epub` in `Raw/Files/`; that folder is ignored by Git.
+
+```bash
+python3 scripts/wiki_tool.py purge-source Raw/Sources/bad-capture.md
+python3 scripts/wiki_tool.py purge-source Raw/Sources/bad-capture.md --apply
+```
+
+Dry-runs, then optionally removes a bad Raw source from the brain. The apply mode deletes the Raw source, deletes single-source Wiki notes that depend only on it, removes that source from multi-source notes, rebuilds indexes, updates the source manifest, and runs source lint.
 
 ```bash
 python3 scripts/audit_public.py

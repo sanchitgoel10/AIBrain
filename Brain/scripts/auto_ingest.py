@@ -63,6 +63,17 @@ def read_list(value: object) -> list[str]:
     return [str(item) for item in value] if isinstance(value, list) else []
 
 
+def source_detail_label(fm: dict) -> str:
+    content_types = {str(item).lower() for item in read_list(fm.get("ContentType"))}
+    if "youtube" in content_types or "transcript" in content_types:
+        return "Full transcript"
+    if "article" in content_types:
+        return "Full article text"
+    if "book" in content_types or "epub" in content_types:
+        return "Full book source"
+    return "Full source"
+
+
 def write_capture_hub(source_path: Path, source_title: str, ingest_path: Path) -> None:
     TOPICS.mkdir(parents=True, exist_ok=True)
     rel_source = wiki_tool.rel(source_path)
@@ -141,6 +152,7 @@ def ingest_source(source: str | Path) -> Path:
     LOGS.mkdir(parents=True, exist_ok=True)
     wiki_path = LOGS / f"{slugify(source_path.stem)}-ingest.md"
     summary = excerpt_from_body(body)
+    detail_label = source_detail_label(fm)
 
     frontmatter = [
         "---",
@@ -162,6 +174,10 @@ def ingest_source(source: str | Path) -> Path:
 Source: {raw_wikilink(source_path, title)}
 
 Hub: [[captured-sources|Captured Sources]]
+
+{detail_label}: {raw_wikilink(source_path, title)}
+
+This ingest note is a lightweight graph link. Keep the full captured material in the Raw source note.
 
 ## Captured Summary
 
