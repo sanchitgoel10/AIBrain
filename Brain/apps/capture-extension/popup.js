@@ -5,6 +5,7 @@ const SEMANTIC_RESET_URL = "http://127.0.0.1:8765/semantic-reset";
 const ASK_URL = "http://127.0.0.1:8765/ask";
 const OPEN_SOURCE_URL = "http://127.0.0.1:8765/open-source";
 const MAX_ARTICLE_SCREENSHOTS = 30;
+const FORCE_SCREENSHOT_OCR_HOSTS = ["the-ken.com", "ft.com"];
 
 const state = {
   tab: null
@@ -41,6 +42,23 @@ function isCaptureUrl(url) {
 
 function isYoutubeUrl(url) {
   return /(^https?:\/\/)?([^/]+\.)?(youtube\.com\/watch|youtu\.be\/)/i.test(url || "");
+}
+
+function hostnameFor(url) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch (_error) {
+    return "";
+  }
+}
+
+function shouldForceScreenshotOcr(tab, page) {
+  const hostname = hostnameFor(tab?.url || "");
+  if (FORCE_SCREENSHOT_OCR_HOSTS.some((host) => hostname === host || hostname.endsWith(`.${host}`))) {
+    return true;
+  }
+  const text = String(page?.text || "").toLowerCase();
+  return /subscribe|sign in|log in|unlock|members only|continue reading/.test(text) && text.length < 5000;
 }
 
 function setProgress(status, message) {
@@ -167,13 +185,39 @@ function articleScrollPlan() {
   const viewport = Math.max(window.innerHeight || 800, 500);
   const maxY = Math.max(height - viewport, 0);
   const step = Math.max(Math.floor(viewport * 0.82), 350);
+  const article =
+    document.querySelector("article") ||
+    document.querySelector("[data-testid*='article']") ||
+    document.querySelector(".article-body") ||
+    document.querySelector(".story-content") ||
+    document.querySelector(".post-content") ||
+    document.querySelector("main") ||
+    document.querySelector("[role='main']");
+  const rect = article?.getBoundingClientRect();
+  let startY = 0;
+  let endY = maxY;
+  if (rect && rect.height > viewport * 1.2) {
+    startY = Math.max(0, Math.floor(rect.top + window.scrollY - 80));
+    const articleBottom = Math.floor(rect.bottom + window.scrollY);
+    endY = Math.max(startY, Math.min(maxY, articleBottom - Math.floor(viewport * 0.85)));
+  }
+  const stopNode = document.querySelector(
+    "footer, [id*='comment' i], [class*='comment' i], [id*='related' i], [class*='related' i], [id*='recommend' i], [class*='recommend' i], [id*='newsletter' i], [class*='newsletter' i]"
+  );
+  const stopRect = stopNode?.getBoundingClientRect();
+  if (stopRect) {
+    const stopTop = Math.floor(stopRect.top + window.scrollY);
+    if (stopTop > startY + viewport && stopTop < endY + viewport) {
+      endY = Math.max(startY, Math.min(endY, stopTop - viewport));
+    }
+  }
   const positions = [];
-  for (let y = 0; y <= maxY; y += step) {
+  for (let y = startY; y <= endY; y += step) {
     positions.push(y);
     if (positions.length >= MAX_ARTICLE_SCREENSHOTS) break;
   }
-  if (!positions.includes(maxY) && positions.length < MAX_ARTICLE_SCREENSHOTS) {
-    positions.push(maxY);
+  if (!positions.includes(endY) && positions.length < MAX_ARTICLE_SCREENSHOTS) {
+    positions.push(endY);
   }
   return {
     originalY: window.scrollY || 0,
@@ -261,14 +305,17 @@ async function getArticlePayload(tab) {
       extractionError: error.message
     };
   }
-  if (page?.text && page.text.trim().length >= 800) {
+  const forceOcr = shouldForceScreenshotOcr(tab, page);
+  if (!forceOcr && page?.text && page.text.trim().length >= 800) {
     page.extractionMethod = "browser-dom";
     return page;
   }
-  setProgress("capturing", "Visible article text is limited. Capturing screenshots for OCR.");
+  setProgress("capturing", forceOcr ? "Capturing article screenshots for OCR." : "Visible article text is limited. Capturing screenshots for OCR.");
   page = page || { title: tab.title || "Article", author: "", date: "", excerpt: "", text: "", textLength: 0 };
   page.screenshots = await captureArticleScreenshots(tab);
   page.extractionMethod = "screenshot-ocr";
+  page.forceOcr = true;
+  page.discardDomTextForOcr = forceOcr;
   return page;
 }
 
@@ -313,6 +360,8 @@ async function askBrain(event) {
   const query = els.askQuery.value.trim();
   if (!query) return;
   els.askSubmit.disabled = true;
+  els.askAnswer.classList.add("hidden");
+  els.askAnswer.innerHTML = "";
   els.askResults.innerHTML = '<div class="result"><div class="result-title">Searching...</div></div>';
   try {
     const response = await fetch(`${ASK_URL}?query=${encodeURIComponent(query)}`);
