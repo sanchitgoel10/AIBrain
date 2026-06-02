@@ -5,7 +5,7 @@ const SEMANTIC_RESET_URL = "http://127.0.0.1:8765/semantic-reset";
 const ASK_URL = "http://127.0.0.1:8765/ask";
 const OPEN_SOURCE_URL = "http://127.0.0.1:8765/open-source";
 const MAX_ARTICLE_SCREENSHOTS = 30;
-const FORCE_SCREENSHOT_OCR_HOSTS = ["the-ken.com", "ft.com"];
+const SCREENSHOT_PRIMARY_HOSTS = ["the-ken.com", "ft.com"];
 
 const state = {
   tab: null
@@ -54,7 +54,7 @@ function hostnameFor(url) {
 
 function shouldForceScreenshotOcr(tab, page) {
   const hostname = hostnameFor(tab?.url || "");
-  if (FORCE_SCREENSHOT_OCR_HOSTS.some((host) => hostname === host || hostname.endsWith(`.${host}`))) {
+  if (SCREENSHOT_PRIMARY_HOSTS.some((host) => hostname === host || hostname.endsWith(`.${host}`))) {
     return true;
   }
   const text = String(page?.text || "").toLowerCase();
@@ -305,17 +305,13 @@ async function getArticlePayload(tab) {
       extractionError: error.message
     };
   }
-  const forceOcr = shouldForceScreenshotOcr(tab, page);
-  if (!forceOcr && page?.text && page.text.trim().length >= 800) {
-    page.extractionMethod = "browser-dom";
-    return page;
-  }
-  setProgress("capturing", forceOcr ? "Capturing article screenshots for OCR." : "Visible article text is limited. Capturing screenshots for OCR.");
+  const useScreenshotAsPrimary = shouldForceScreenshotOcr(tab, page);
+  setProgress("capturing", "Capturing rendered article screenshots for OCR.");
   page = page || { title: tab.title || "Article", author: "", date: "", excerpt: "", text: "", textLength: 0 };
   page.screenshots = await captureArticleScreenshots(tab);
   page.extractionMethod = "screenshot-ocr";
   page.forceOcr = true;
-  page.discardDomTextForOcr = forceOcr;
+  page.discardDomTextForOcr = useScreenshotAsPrimary;
   return page;
 }
 
