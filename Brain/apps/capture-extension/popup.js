@@ -3,6 +3,8 @@ const STATUS_URL = "http://127.0.0.1:8765/status";
 const BRAIN_STATUS_URL = "http://127.0.0.1:8765/brain-status";
 const SEMANTIC_RESET_URL = "http://127.0.0.1:8765/semantic-reset";
 const ASK_URL = "http://127.0.0.1:8765/ask";
+const OPEN_SOURCE_URL = "http://127.0.0.1:8765/open-source";
+const MAX_ARTICLE_SCREENSHOTS = 30;
 
 const state = {
   tab: null
@@ -10,6 +12,7 @@ const state = {
 
 const els = {
   addPanel: document.getElementById("addPanel"),
+  askAnswer: document.getElementById("askAnswer"),
   askForm: document.getElementById("askForm"),
   askPanel: document.getElementById("askPanel"),
   askQuery: document.getElementById("askQuery"),
@@ -87,6 +90,21 @@ async function refreshBrainStatus() {
   }
 }
 
+function renderAskResponse(payload) {
+  const answer = (payload.answer || "").trim();
+  if (answer) {
+    els.askAnswer.classList.remove("hidden");
+    els.askAnswer.innerHTML = `
+      <div class="answer-label">Answer</div>
+      <div class="answer-text">${escapeHtml(answer)}</div>
+    `;
+  } else {
+    els.askAnswer.classList.add("hidden");
+    els.askAnswer.innerHTML = "";
+  }
+  renderAskResults(payload.sources || payload.results || []);
+}
+
 function renderAskResults(results) {
   if (!results.length) {
     els.askResults.innerHTML = '<div class="result"><div class="result-title">No matches</div></div>';
@@ -97,6 +115,9 @@ function renderAskResults(results) {
       <div class="result-title">${escapeHtml(result.title || result.path || "Result")}</div>
       <div class="result-path">${escapeHtml(result.path || "")}</div>
       <div class="result-snippet">${escapeHtml(result.snippet || "")}</div>
+      <div class="result-actions">
+        <button class="source-action" type="button" data-path="${escapeHtml(result.path || "")}">Reveal</button>
+      </div>
     </article>
   `).join("");
 }
@@ -149,9 +170,9 @@ function articleScrollPlan() {
   const positions = [];
   for (let y = 0; y <= maxY; y += step) {
     positions.push(y);
-    if (positions.length >= 10) break;
+    if (positions.length >= MAX_ARTICLE_SCREENSHOTS) break;
   }
-  if (!positions.includes(maxY) && positions.length < 10) {
+  if (!positions.includes(maxY) && positions.length < MAX_ARTICLE_SCREENSHOTS) {
     positions.push(maxY);
   }
   return {
@@ -167,8 +188,29 @@ function scrollToCapturePosition(y) {
 }
 
 async function getActiveTab() {
-  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-  return tabs[0] || null;
+  const queries = [
+    { active: true, currentWindow: true },
+    { active: true, lastFocusedWindow: true },
+    { active: true }
+  ];
+  for (const query of queries) {
+    const tabs = await chrome.tabs.query(query);
+    const tab = tabs.find((item) => isCaptureUrl(item?.url || ""));
+    if (tab) return tab;
+  }
+
+  const windows = await chrome.windows.getAll({ populate: true, windowTypes: ["normal"] });
+  const focused = windows.find((item) => item.focused);
+  const ordered = focused ? [focused, ...windows.filter((item) => item.id !== focused.id)] : windows;
+  for (const win of ordered) {
+    const tab = (win.tabs || []).find((item) => item.active && isCaptureUrl(item.url || ""));
+    if (tab) return tab;
+  }
+
+  const tabs = await chrome.tabs.query({});
+  return tabs
+    .filter((item) => isCaptureUrl(item.url || ""))
+    .sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0))[0] || null;
 }
 
 async function captureArticleScreenshots(tab) {
@@ -178,7 +220,7 @@ async function captureArticleScreenshots(tab) {
   });
   const plan = planResults?.[0]?.result || { positions: [0], originalY: 0 };
   const screenshots = [];
-  const positions = (plan.positions || [0]).slice(0, 10);
+  const positions = (plan.positions || [0]).slice(0, MAX_ARTICLE_SCREENSHOTS);
   for (let index = 0; index < positions.length; index += 1) {
     const y = positions[index];
     await chrome.scripting.executeScript({
@@ -276,12 +318,17 @@ async function askBrain(event) {
     const response = await fetch(`${ASK_URL}?query=${encodeURIComponent(query)}`);
     const payload = await response.json().catch(() => ({}));
     if (!response.ok || !payload.ok) throw new Error(payload.error || "Search failed");
-    renderAskResults(payload.results || []);
+    renderAskResponse(payload);
   } catch (error) {
     els.askResults.innerHTML = `<div class="result"><div class="result-title">${escapeHtml(error.message)}</div></div>`;
   } finally {
     els.askSubmit.disabled = false;
   }
+}
+
+async function revealSource(path) {
+  if (!path) return;
+  await fetch(`${OPEN_SOURCE_URL}?path=${encodeURIComponent(path)}`);
 }
 
 async function startCapture() {
@@ -338,4 +385,8 @@ els.resetCompile.addEventListener("click", resetSemanticCounter);
 els.tabAdd.addEventListener("click", () => setMode("add"));
 els.tabAsk.addEventListener("click", () => setMode("ask"));
 els.askForm.addEventListener("submit", askBrain);
+els.askResults.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-path]");
+  if (button) revealSource(button.dataset.path || "");
+});
 init();
