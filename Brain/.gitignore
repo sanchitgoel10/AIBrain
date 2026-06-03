@@ -2,6 +2,7 @@
 .env
 .env.local
 .obsidian/workspace*.json
+.obsidian/graph.json
 .obsidian/plugins/
 .obsidian/cache/
 .obsidian/logs/

@@ -244,13 +244,27 @@ function articleScrollSnapshot() {
   }
 
   function articleEndVisible() {
+    const contentRoot =
+      document.querySelector("article") ||
+      document.querySelector("[data-testid*='article' i]") ||
+      document.querySelector("[class*='article' i]") ||
+      document.querySelector("[class*='story' i]") ||
+      document.querySelector("main") ||
+      document.querySelector("[role='main']");
+    const contentRect = contentRoot?.getBoundingClientRect();
+    const viewportCenterX = window.innerWidth / 2;
+    const contentLeft = contentRect && contentRect.width > 320 ? contentRect.left : window.innerWidth * 0.22;
+    const contentRight = contentRect && contentRect.width > 320 ? contentRect.right : window.innerWidth * 0.78;
     const stopNodes = document.querySelectorAll(
       "footer, [id*='comment' i], [class*='comment' i], [id*='related' i], [class*='related' i], [id*='recommend' i], [class*='recommend' i], [id*='newsletter' i], [class*='newsletter' i], [aria-label*='comment' i]"
     );
     for (const node of stopNodes) {
       const rect = node.getBoundingClientRect();
       if (!rect || rect.height < 35 || rect.width < 240) continue;
-      if (rect.top > 120 && rect.top < window.innerHeight * 0.62) return true;
+      const intersectsArticleColumn =
+        (rect.left <= viewportCenterX && rect.right >= viewportCenterX) ||
+        (rect.left < contentRight && rect.right > contentLeft && rect.width > Math.min(420, window.innerWidth * 0.45));
+      if (intersectsArticleColumn && rect.top > window.innerHeight * 0.18 && rect.top < window.innerHeight * 0.72) return true;
     }
     return false;
   }
@@ -330,13 +344,27 @@ async function advanceArticleScroll(step) {
   }
 
   function articleEndVisible() {
+    const contentRoot =
+      document.querySelector("article") ||
+      document.querySelector("[data-testid*='article' i]") ||
+      document.querySelector("[class*='article' i]") ||
+      document.querySelector("[class*='story' i]") ||
+      document.querySelector("main") ||
+      document.querySelector("[role='main']");
+    const contentRect = contentRoot?.getBoundingClientRect();
+    const viewportCenterX = window.innerWidth / 2;
+    const contentLeft = contentRect && contentRect.width > 320 ? contentRect.left : window.innerWidth * 0.22;
+    const contentRight = contentRect && contentRect.width > 320 ? contentRect.right : window.innerWidth * 0.78;
     const stopNodes = document.querySelectorAll(
       "footer, [id*='comment' i], [class*='comment' i], [id*='related' i], [class*='related' i], [id*='recommend' i], [class*='recommend' i], [id*='newsletter' i], [class*='newsletter' i], [aria-label*='comment' i]"
     );
     for (const node of stopNodes) {
       const rect = node.getBoundingClientRect();
       if (!rect || rect.height < 35 || rect.width < 240) continue;
-      if (rect.top > 120 && rect.top < window.innerHeight * 0.62) return true;
+      const intersectsArticleColumn =
+        (rect.left <= viewportCenterX && rect.right >= viewportCenterX) ||
+        (rect.left < contentRight && rect.right > contentLeft && rect.width > Math.min(420, window.innerWidth * 0.45));
+      if (intersectsArticleColumn && rect.top > window.innerHeight * 0.18 && rect.top < window.innerHeight * 0.72) return true;
     }
     return false;
   }
@@ -433,6 +461,7 @@ async function captureArticleScreenshots(tab) {
     setProgress("capturing", `Capturing article screenshot ${index + 1}/${MAX_ARTICLE_SCREENSHOTS} for OCR.`);
     const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" });
     screenshots.push({ y: state.y || 0, scrollMode: state.scrollMode || "window", dataUrl });
+    if (index >= 3 && state.articleEnded) break;
     if (index >= MAX_ARTICLE_SCREENSHOTS - 1) break;
     const advanceResults = await chrome.scripting.executeScript({
       target: { tabId: tab.id },

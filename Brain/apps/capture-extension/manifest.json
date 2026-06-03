@@ -1,12 +1,14 @@
 {
   "manifest_version": 3,
   "name": "AI Brain Capture",
-  "version": "0.14.4",
+  "version": "0.15.0",
   "description": "Capture the exact active YouTube or article tab into the local AI Brain vault.",
   "permissions": ["activeTab", "tabs", "scripting"],
   "host_permissions": ["http://127.0.0.1:8765/*"],
   "action": {
-    "default_title": "Add to Brain",
-    "default_popup": "popup.html"
+    "default_title": "Add to Brain"
+  },
+  "background": {
+    "service_worker": "background.js"
   }
 }
