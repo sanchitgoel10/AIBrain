@@ -430,7 +430,6 @@ async function captureArticleScreenshots(tab) {
       func: articleScrollSnapshot
     });
     state = snapshotResults?.[0]?.result || state;
-    if (index > 0 && state.articleEnded) break;
     setProgress("capturing", `Capturing article screenshot ${index + 1}/${MAX_ARTICLE_SCREENSHOTS} for OCR.`);
     const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" });
     screenshots.push({ y: state.y || 0, scrollMode: state.scrollMode || "window", dataUrl });
@@ -447,7 +446,6 @@ async function captureArticleScreenshots(tab) {
       stagnantMoves += 1;
       if (stagnantMoves >= 2) break;
     }
-    if (state.articleEnded) break;
     if (state.maxY > 0 && state.y >= state.maxY - 16) break;
   }
   await chrome.scripting.executeScript({
