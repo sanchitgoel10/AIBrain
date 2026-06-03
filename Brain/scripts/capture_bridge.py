@@ -267,8 +267,9 @@ def run_capture_job(job_id: str, payload: dict) -> None:
             set_job(job_id, status="capturing", message="Capturing YouTube transcript. Uncached videos can take a few minutes.")
             path = capture.capture_youtube(url=url)
         elif isinstance(payload.get("page"), dict):
-            if payload["page"].get("screenshots"):
-                set_job(job_id, status="capturing", message="Running local OCR over article screenshots.")
+            screenshots = payload["page"].get("screenshots")
+            if screenshots:
+                set_job(job_id, status="capturing", message=f"Running local OCR over {len(screenshots)} article screenshots.")
             else:
                 set_job(job_id, status="capturing", message="Saving visible article text from the browser tab.")
             article_payload = article_payload_with_ocr(payload)

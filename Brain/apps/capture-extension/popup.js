@@ -6,6 +6,8 @@ const ASK_URL = "http://127.0.0.1:8765/ask";
 const OPEN_SOURCE_URL = "http://127.0.0.1:8765/open-source";
 const MAX_ARTICLE_SCREENSHOTS = 30;
 const SCREENSHOT_PRIMARY_HOSTS = ["the-ken.com", "ft.com"];
+const DIRECT_TEXT_MIN_CHARS = 1800;
+const DIRECT_TEXT_GOOD_CHARS = 4500;
 
 const state = {
   tab: null
@@ -22,6 +24,7 @@ const els = {
   compileCard: document.getElementById("compileCard"),
   compileStatus: document.getElementById("compileStatus"),
   capture: document.getElementById("capture"),
+  forceOcr: document.getElementById("forceOcr"),
   kind: document.getElementById("kind"),
   progress: document.getElementById("progressBar"),
   resetCompile: document.getElementById("resetCompile"),
@@ -52,13 +55,24 @@ function hostnameFor(url) {
   }
 }
 
-function shouldForceScreenshotOcr(tab, page) {
+function hasBlockerText(text) {
+  return /subscribe|sign in|log in|unlock|members only|continue reading|already a subscriber|paywall/.test(String(text || "").toLowerCase());
+}
+
+function shouldPreferScreenshotOcr(tab, page) {
   const hostname = hostnameFor(tab?.url || "");
   if (SCREENSHOT_PRIMARY_HOSTS.some((host) => hostname === host || hostname.endsWith(`.${host}`))) {
     return true;
   }
-  const text = String(page?.text || "").toLowerCase();
-  return /subscribe|sign in|log in|unlock|members only|continue reading/.test(text) && text.length < 5000;
+  const text = String(page?.text || "");
+  return hasBlockerText(text) && text.length < DIRECT_TEXT_GOOD_CHARS;
+}
+
+function directExtractionLooksComplete(page) {
+  const text = String(page?.text || "").trim();
+  if (text.length < DIRECT_TEXT_MIN_CHARS) return false;
+  if (hasBlockerText(text) && text.length < DIRECT_TEXT_GOOD_CHARS) return false;
+  return true;
 }
 
 function setProgress(status, message) {
@@ -201,14 +215,16 @@ function articleScrollPlan() {
     const articleBottom = Math.floor(rect.bottom + window.scrollY);
     endY = Math.max(startY, Math.min(maxY, articleBottom - Math.floor(viewport * 0.85)));
   }
-  const stopNode = document.querySelector(
+  const stopNodes = document.querySelectorAll(
     "footer, [id*='comment' i], [class*='comment' i], [id*='related' i], [class*='related' i], [id*='recommend' i], [class*='recommend' i], [id*='newsletter' i], [class*='newsletter' i]"
   );
-  const stopRect = stopNode?.getBoundingClientRect();
-  if (stopRect) {
+  for (const stopNode of stopNodes) {
+    const stopRect = stopNode.getBoundingClientRect();
+    if (!stopRect || stopRect.height < 40) continue;
     const stopTop = Math.floor(stopRect.top + window.scrollY);
     if (stopTop > startY + viewport && stopTop < endY + viewport) {
       endY = Math.max(startY, Math.min(endY, stopTop - viewport));
+      break;
     }
   }
   const positions = [];
@@ -222,6 +238,8 @@ function articleScrollPlan() {
   return {
     originalY: window.scrollY || 0,
     positions: [...new Set(positions)],
+    startY,
+    endY,
     title: document.title
   };
 }
@@ -305,13 +323,24 @@ async function getArticlePayload(tab) {
       extractionError: error.message
     };
   }
-  const useScreenshotAsPrimary = shouldForceScreenshotOcr(tab, page);
-  setProgress("capturing", "Capturing rendered article screenshots for OCR.");
+  const userForcedOcr = Boolean(els.forceOcr?.checked);
+  const useScreenshotAsPrimary = userForcedOcr || shouldPreferScreenshotOcr(tab, page);
+  const canUseDirect = !userForcedOcr && !useScreenshotAsPrimary && directExtractionLooksComplete(page);
+  if (canUseDirect) {
+    page.extractionMethod = "browser-dom";
+    page.forceOcr = false;
+    page.discardDomTextForOcr = false;
+    page.captureDecision = "direct";
+    return page;
+  }
+
+  setProgress("capturing", userForcedOcr ? "Force OCR enabled. Capturing screenshots." : "Direct text looked incomplete. Capturing screenshots for OCR.");
   page = page || { title: tab.title || "Article", author: "", date: "", excerpt: "", text: "", textLength: 0 };
   page.screenshots = await captureArticleScreenshots(tab);
   page.extractionMethod = "screenshot-ocr";
   page.forceOcr = true;
   page.discardDomTextForOcr = useScreenshotAsPrimary;
+  page.captureDecision = userForcedOcr ? "force-ocr" : "fallback-ocr";
   return page;
 }
 
@@ -389,7 +418,12 @@ async function startCapture() {
     setProgress("queued", "Preparing active tab.");
     const page = await getArticlePayload(tab);
     if (page) {
-      setProgress("queued", `Read ${page.textLength.toLocaleString()} visible article characters.`);
+      const screenshotCount = Array.isArray(page.screenshots) ? page.screenshots.length : 0;
+      if (screenshotCount) {
+        setProgress("queued", `Captured ${screenshotCount} screenshots. Sending to OCR.`);
+      } else {
+        setProgress("queued", `Using direct article text (${page.textLength.toLocaleString()} characters).`);
+      }
     }
     const response = await fetch(BRIDGE_URL, {
       method: "POST",
