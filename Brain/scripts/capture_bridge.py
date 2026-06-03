@@ -228,7 +228,7 @@ def article_payload_with_ocr(payload: dict) -> dict:
     page = dict(payload.get("page") if isinstance(payload.get("page"), dict) else {})
     text = str(page.get("text", "")).strip()
     screenshots = page.get("screenshots") if isinstance(page.get("screenshots"), list) else []
-    force_ocr = bool(page.get("forceOcr") or page.get("extractionMethod") == "screenshot-ocr")
+    force_ocr = bool(page.get("extractionMethod") == "screenshot-ocr")
     discard_dom_text = bool(page.get("discardDomTextForOcr"))
     if discard_dom_text:
         text = ""

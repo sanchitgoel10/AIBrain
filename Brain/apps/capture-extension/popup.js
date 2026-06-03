@@ -24,7 +24,6 @@ const els = {
   compileCard: document.getElementById("compileCard"),
   compileStatus: document.getElementById("compileStatus"),
   capture: document.getElementById("capture"),
-  forceOcr: document.getElementById("forceOcr"),
   kind: document.getElementById("kind"),
   progress: document.getElementById("progressBar"),
   resetCompile: document.getElementById("resetCompile"),
@@ -380,24 +379,21 @@ async function getArticlePayload(tab) {
       extractionError: error.message
     };
   }
-  const userForcedOcr = Boolean(els.forceOcr?.checked);
-  const useScreenshotAsPrimary = userForcedOcr || shouldPreferScreenshotOcr(tab, page);
-  const canUseDirect = !userForcedOcr && !useScreenshotAsPrimary && directExtractionLooksComplete(page);
+  const useScreenshotAsPrimary = shouldPreferScreenshotOcr(tab, page);
+  const canUseDirect = !useScreenshotAsPrimary && directExtractionLooksComplete(page);
   if (canUseDirect) {
     page.extractionMethod = "browser-dom";
-    page.forceOcr = false;
     page.discardDomTextForOcr = false;
     page.captureDecision = "direct";
     return page;
   }
 
-  setProgress("capturing", userForcedOcr ? "Force OCR enabled. Capturing screenshots." : "Direct text looked incomplete. Capturing screenshots for OCR.");
+  setProgress("capturing", "Direct text looked incomplete. Capturing screenshots for OCR.");
   page = page || { title: tab.title || "Article", author: "", date: "", excerpt: "", text: "", textLength: 0 };
   page.screenshots = await captureArticleScreenshots(tab);
   page.extractionMethod = "screenshot-ocr";
-  page.forceOcr = true;
   page.discardDomTextForOcr = useScreenshotAsPrimary;
-  page.captureDecision = userForcedOcr ? "force-ocr" : "fallback-ocr";
+  page.captureDecision = "fallback-ocr";
   return page;
 }
 
