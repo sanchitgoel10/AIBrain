@@ -192,11 +192,36 @@ function extractVisiblePage() {
 }
 
 function articleScrollPlan() {
-  const height = Math.max(
-    document.body?.scrollHeight || 0,
-    document.documentElement?.scrollHeight || 0
-  );
-  const viewport = Math.max(window.innerHeight || 800, 500);
+  function isWindowScrollRoot(element) {
+    return !element || element === document.body || element === document.documentElement || element === document.scrollingElement;
+  }
+
+  function findScrollRoot() {
+    const documentRoot = document.scrollingElement || document.documentElement || document.body;
+    const candidates = [documentRoot, ...document.querySelectorAll("main, article, [role='main'], div, section")];
+    let best = documentRoot;
+    let bestScrollable = Math.max((documentRoot?.scrollHeight || 0) - (window.innerHeight || documentRoot?.clientHeight || 0), 0);
+    for (const candidate of candidates) {
+      if (!candidate || candidate === document.body || candidate === document.documentElement) continue;
+      const style = window.getComputedStyle(candidate);
+      const overflowY = `${style.overflowY} ${style.overflow}`;
+      const scrollable = Math.max((candidate.scrollHeight || 0) - (candidate.clientHeight || 0), 0);
+      const visibleEnough = candidate.clientHeight > 250 && candidate.clientWidth > 280;
+      const canScroll = /(auto|scroll|overlay)/.test(overflowY) || scrollable > 500;
+      if (visibleEnough && canScroll && scrollable > bestScrollable) {
+        best = candidate;
+        bestScrollable = scrollable;
+      }
+    }
+    return best;
+  }
+
+  const scrollRoot = findScrollRoot();
+  const usesWindow = isWindowScrollRoot(scrollRoot);
+  const height = usesWindow
+    ? Math.max(document.body?.scrollHeight || 0, document.documentElement?.scrollHeight || 0)
+    : scrollRoot.scrollHeight;
+  const viewport = Math.max(usesWindow ? window.innerHeight || 800 : scrollRoot.clientHeight || 800, 500);
   const maxY = Math.max(height - viewport, 0);
   const step = Math.max(Math.floor(viewport * 0.82), 350);
   const article =
@@ -237,16 +262,47 @@ function articleScrollPlan() {
   }
   return {
     originalY: window.scrollY || 0,
+    originalElementY: usesWindow ? 0 : scrollRoot.scrollTop || 0,
     positions: [...new Set(positions)],
     startY,
     endY,
+    scrollMode: usesWindow ? "window" : "element",
     title: document.title
   };
 }
 
 function scrollToCapturePosition(y) {
-  window.scrollTo(0, y);
-  return { y: window.scrollY || y };
+  function isWindowScrollRoot(element) {
+    return !element || element === document.body || element === document.documentElement || element === document.scrollingElement;
+  }
+
+  function findScrollRoot() {
+    const documentRoot = document.scrollingElement || document.documentElement || document.body;
+    const candidates = [documentRoot, ...document.querySelectorAll("main, article, [role='main'], div, section")];
+    let best = documentRoot;
+    let bestScrollable = Math.max((documentRoot?.scrollHeight || 0) - (window.innerHeight || documentRoot?.clientHeight || 0), 0);
+    for (const candidate of candidates) {
+      if (!candidate || candidate === document.body || candidate === document.documentElement) continue;
+      const style = window.getComputedStyle(candidate);
+      const overflowY = `${style.overflowY} ${style.overflow}`;
+      const scrollable = Math.max((candidate.scrollHeight || 0) - (candidate.clientHeight || 0), 0);
+      const visibleEnough = candidate.clientHeight > 250 && candidate.clientWidth > 280;
+      const canScroll = /(auto|scroll|overlay)/.test(overflowY) || scrollable > 500;
+      if (visibleEnough && canScroll && scrollable > bestScrollable) {
+        best = candidate;
+        bestScrollable = scrollable;
+      }
+    }
+    return best;
+  }
+
+  const scrollRoot = findScrollRoot();
+  if (isWindowScrollRoot(scrollRoot)) {
+    window.scrollTo(0, y);
+    return { y: window.scrollY || y, mode: "window" };
+  }
+  scrollRoot.scrollTo(0, y);
+  return { y: scrollRoot.scrollTop || y, mode: "element" };
 }
 
 async function getActiveTab() {
@@ -283,6 +339,7 @@ async function captureArticleScreenshots(tab) {
   const plan = planResults?.[0]?.result || { positions: [0], originalY: 0 };
   const screenshots = [];
   const positions = (plan.positions || [0]).slice(0, MAX_ARTICLE_SCREENSHOTS);
+  setProgress("capturing", `Planned ${positions.length} article screenshots using ${plan.scrollMode || "window"} scroll.`);
   for (let index = 0; index < positions.length; index += 1) {
     const y = positions[index];
     await chrome.scripting.executeScript({
@@ -298,7 +355,7 @@ async function captureArticleScreenshots(tab) {
   await chrome.scripting.executeScript({
     target: { tabId: tab.id },
     func: scrollToCapturePosition,
-    args: [plan.originalY || 0]
+    args: [plan.scrollMode === "element" ? plan.originalElementY || 0 : plan.originalY || 0]
   });
   return screenshots;
 }
