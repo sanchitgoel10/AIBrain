@@ -586,21 +586,36 @@ async function revealSource(path) {
   await fetch(`${OPEN_SOURCE_URL}?path=${encodeURIComponent(path)}`);
 }
 
+async function brainWindowBounds() {
+  const width = 390;
+  const height = 640;
+  const edgeMargin = 12;
+  const topOffset = 48;
+  const browserWindow = await chrome.windows.getLastFocused({ windowTypes: ["normal"] }).catch(() => null);
+  if (!browserWindow) return { width, height };
+  return {
+    width,
+    height,
+    left: Math.max((browserWindow.left || 0) + edgeMargin, (browserWindow.left || 0) + (browserWindow.width || width) - width - edgeMargin),
+    top: Math.max((browserWindow.top || 0) + edgeMargin, (browserWindow.top || 0) + topOffset)
+  };
+}
+
 chrome.action.onClicked.addListener(async () => {
   const url = chrome.runtime.getURL("popup.html");
   const windows = await chrome.windows.getAll({ populate: true, windowTypes: ["popup"] });
   const existing = windows.find((win) =>
     (win.tabs || []).some((tab) => (tab.url || "").startsWith(url))
   );
+  const bounds = await brainWindowBounds();
   if (existing?.id) {
-    await chrome.windows.update(existing.id, { focused: true });
+    await chrome.windows.update(existing.id, { ...bounds, focused: true });
     return;
   }
   await chrome.windows.create({
     url,
     type: "popup",
-    width: 390,
-    height: 640,
+    ...bounds,
     focused: true
   });
 });
