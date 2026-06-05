@@ -607,7 +607,7 @@ async function revealSource(path) {
 
 async function brainWindowBounds() {
   const width = 390;
-  const height = 640;
+  const height = 500;
   const edgeMargin = 12;
   const topOffset = 48;
   const browserWindow = await chrome.windows.getLastFocused({ windowTypes: ["normal"] }).catch(() => null);
