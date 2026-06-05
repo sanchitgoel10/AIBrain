@@ -499,7 +499,7 @@ async function pollJob(jobId) {
 
 async function refreshContext() {
   const tab = await getActiveTab();
-  const tabInfo = tab ? {
+  const activeTabInfo = tab ? {
     id: tab.id,
     windowId: tab.windowId,
     title: tab.title || "",
@@ -507,7 +507,26 @@ async function refreshContext() {
     kind: isYoutubeUrl(tab.url || "") ? "YouTube transcript" : "Article page",
     capturable: isCaptureUrl(tab.url || "")
   } : null;
-  await saveState({ tab: tabInfo });
+  const capture = uiState.capture || {};
+  const captureMatchesActiveTab = Boolean(capture.tabUrl && activeTabInfo?.url && capture.tabUrl === activeTabInfo.url);
+  const displayTabInfo = capture.running && capture.tabUrl ? {
+    title: capture.tabTitle || "Capture in progress",
+    url: capture.tabUrl,
+    kind: isYoutubeUrl(capture.tabUrl) ? "YouTube transcript" : "Article page",
+    capturable: true
+  } : activeTabInfo;
+  const captureState = !capture.running && capture.tabUrl && activeTabInfo?.url && !captureMatchesActiveTab ? {
+    status: "idle",
+    message: "Ready to add this active tab.",
+    running: false,
+    tabUrl: "",
+    tabTitle: "",
+    bridgeJobId: "",
+    path: "",
+    ingestPath: "",
+    updatedAt: new Date().toISOString()
+  } : capture;
+  await saveState({ tab: displayTabInfo, capture: captureState });
   try {
     const response = await fetch(BRAIN_STATUS_URL);
     const payload = await response.json().catch(() => ({}));
@@ -602,6 +621,8 @@ async function brainWindowBounds() {
 }
 
 chrome.action.onClicked.addListener(async () => {
+  await loadState();
+  if (!uiState.capture?.running) await refreshContext();
   const url = chrome.runtime.getURL("popup.html");
   const windows = await chrome.windows.getAll({ populate: true, windowTypes: ["popup"] });
   const existing = windows.find((win) =>
@@ -618,6 +639,17 @@ chrome.action.onClicked.addListener(async () => {
     ...bounds,
     focused: true
   });
+});
+
+chrome.tabs.onActivated.addListener(() => {
+  if (!uiState.capture?.running) refreshContext().catch(() => {});
+});
+
+chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
+  if (!tab.active || uiState.capture?.running) return;
+  if (changeInfo.url || changeInfo.title || changeInfo.status === "complete") {
+    refreshContext().catch(() => {});
+  }
 });
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
