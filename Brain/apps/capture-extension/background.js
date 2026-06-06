@@ -4,7 +4,8 @@ const BRAIN_STATUS_URL = "http://127.0.0.1:8765/brain-status";
 const SEMANTIC_RESET_URL = "http://127.0.0.1:8765/semantic-reset";
 const ASK_URL = "http://127.0.0.1:8765/ask";
 const OPEN_SOURCE_URL = "http://127.0.0.1:8765/open-source";
-const MAX_ARTICLE_SCREENSHOTS = 30;
+const ARTICLE_CAPTURE_TIMEOUT_MS = 120000;
+const ARTICLE_CAPTURE_MAX_BYTES = 64 * 1024 * 1024;
 const SCREENSHOT_PRIMARY_HOSTS = ["the-ken.com", "ft.com"];
 const DIRECT_TEXT_MIN_CHARS = 1800;
 const DIRECT_TEXT_GOOD_CHARS = 4500;
@@ -398,39 +399,66 @@ async function captureArticleScreenshots(tab) {
   const screenshots = [];
   let state = initial;
   let stagnantMoves = 0;
+  let capturedBytes = 0;
+  let stopReason = "article end";
+  const startedAt = Date.now();
   await updateCapture("capturing", `Starting article screenshots using ${initial.scrollMode || "window"} scroll.`);
-  for (let index = 0; index < MAX_ARTICLE_SCREENSHOTS; index += 1) {
-    await sleep(index === 0 ? 250 : 500);
-    const snapshotResults = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: articleScrollSnapshot
-    });
-    state = snapshotResults?.[0]?.result || state;
-    await updateCapture("capturing", `Capturing article screenshot ${index + 1}/${MAX_ARTICLE_SCREENSHOTS} for OCR.`);
-    const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" });
-    screenshots.push({ y: state.y || 0, scrollMode: state.scrollMode || "window", dataUrl });
-    if (index >= 3 && state.articleEnded) break;
-    if (index >= MAX_ARTICLE_SCREENSHOTS - 1) break;
-    const advanceResults = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: advanceArticleScroll,
-      args: [state.step || 650]
-    });
-    state = advanceResults?.[0]?.result || state;
-    if (state.moved) {
-      stagnantMoves = 0;
-    } else {
-      stagnantMoves += 1;
-      if (stagnantMoves >= 2) break;
+  try {
+    let index = 0;
+    while (Date.now() - startedAt < ARTICLE_CAPTURE_TIMEOUT_MS && capturedBytes < ARTICLE_CAPTURE_MAX_BYTES) {
+      await sleep(index === 0 ? 250 : 500);
+      const snapshotResults = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: articleScrollSnapshot
+      });
+      state = snapshotResults?.[0]?.result || state;
+      await updateCapture("capturing", `Capturing article screenshot ${index + 1} for OCR.`);
+      const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" });
+      const previous = screenshots[screenshots.length - 1];
+      if (previous?.dataUrl === dataUrl) {
+        stopReason = "duplicate viewport";
+        break;
+      }
+      screenshots.push({ y: state.y || 0, scrollMode: state.scrollMode || "window", dataUrl });
+      capturedBytes += dataUrl.length;
+      if (index >= 3 && state.articleEnded) {
+        stopReason = "article end";
+        break;
+      }
+      const advanceResults = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: advanceArticleScroll,
+        args: [state.step || 650]
+      });
+      state = advanceResults?.[0]?.result || state;
+      if (state.moved) {
+        stagnantMoves = 0;
+      } else {
+        stagnantMoves += 1;
+        if (stagnantMoves >= 2) {
+          stopReason = "page stopped moving";
+          break;
+        }
+      }
+      if (state.maxY > 0 && state.y >= state.maxY - 16) {
+        stopReason = "page bottom";
+        break;
+      }
+      index += 1;
     }
-    if (state.maxY > 0 && state.y >= state.maxY - 16) break;
+    if (Date.now() - startedAt >= ARTICLE_CAPTURE_TIMEOUT_MS) {
+      stopReason = "safety timeout";
+    } else if (capturedBytes >= ARTICLE_CAPTURE_MAX_BYTES) {
+      stopReason = "safety data budget";
+    }
+  } finally {
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: restoreArticleScroll,
+      args: [initial]
+    });
   }
-  await chrome.scripting.executeScript({
-    target: { tabId: tab.id },
-    func: restoreArticleScroll,
-    args: [initial]
-  });
-  await updateCapture("capturing", `Captured ${screenshots.length} article screenshots using ${initial.scrollMode || "window"} scroll.`);
+  await updateCapture("capturing", `Captured ${screenshots.length} article screenshots; stopped at ${stopReason}.`);
   return screenshots;
 }
 
