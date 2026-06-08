@@ -110,6 +110,17 @@ async function updateAsk(patch = {}) {
   });
 }
 
+function captureErrorMessage(error) {
+  const message = String(error?.message || error || "Capture failed");
+  if (/cannot access contents|cannot access a chrome|missing host permission|manifest must request permission/i.test(message)) {
+    return "This browser page cannot be accessed. Open a regular http or https article page, then try again.";
+  }
+  if (/failed to fetch|networkerror|bridge returned|status returned/i.test(message)) {
+    return `${message} Start scripts/run_capture_bridge.sh and reload the extension if needed.`;
+  }
+  return message;
+}
+
 function extractVisiblePage() {
   const pick = (...selectors) => {
     for (const selector of selectors) {
@@ -597,7 +608,7 @@ async function startCapture() {
     }
     await pollJob(payload.job_id);
   } catch (error) {
-    await updateCapture("error", `${error.message} Start scripts/run_capture_bridge.sh and reload the extension if needed.`, { running: false });
+    await updateCapture("error", captureErrorMessage(error), { running: false });
   }
 }
 
