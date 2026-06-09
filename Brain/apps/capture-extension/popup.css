@@ -156,6 +156,11 @@ p {
   background: #b42318;
 }
 
+.progress-bar.cancelled {
+  width: 100%;
+  background: #697386;
+}
+
 .status {
   min-height: 34px;
   margin-top: 10px;
@@ -166,6 +171,7 @@ p {
 
 .primary-action,
 .secondary-action,
+.stop-action,
 button {
   width: 100%;
   height: 38px;
@@ -176,6 +182,14 @@ button {
   color: white;
   font-size: 13px;
   font-weight: 720;
+}
+
+.capture-actions {
+  display: grid;
+}
+
+.stop-action {
+  background: #b42318;
 }
 
 button:disabled {

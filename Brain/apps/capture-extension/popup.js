@@ -18,6 +18,7 @@ const els = {
   progress: document.getElementById("progressBar"),
   resetCompile: document.getElementById("resetCompile"),
   status: document.getElementById("status"),
+  stopCapture: document.getElementById("stopCapture"),
   tabAdd: document.getElementById("tabAdd"),
   tabAsk: document.getElementById("tabAsk"),
   title: document.getElementById("title"),
@@ -122,7 +123,9 @@ function render(ui) {
   els.title.textContent = tab.title || "No active tab";
   els.url.textContent = tab.url || "";
   els.kind.textContent = tab.kind || "Reading active tab";
-  els.capture.disabled = Boolean(capture.running) || tab.capturable === false;
+  els.capture.disabled = tab.capturable === false;
+  els.capture.classList.toggle("hidden", Boolean(capture.running));
+  els.stopCapture.classList.toggle("hidden", !capture.running);
   setProgress(capture.status || "idle", capture.message || (tab.capturable === false ? "Open a YouTube video or article tab first." : "Ready."));
   updateBrainStatus(state.ui.brainStatus || null);
   renderAsk(state.ui.ask || {});
@@ -138,6 +141,17 @@ async function startCapture() {
   setProgress("queued", "Preparing active tab.");
   const response = await sendMessage({ type: "start-capture" });
   if (response?.ok && response.state) render(response.state);
+}
+
+async function stopCapture() {
+  els.stopCapture.disabled = true;
+  setProgress("cancelled", "Stopping capture...");
+  try {
+    const response = await sendMessage({ type: "stop-capture" });
+    if (response?.ok && response.state) render(response.state);
+  } finally {
+    els.stopCapture.disabled = false;
+  }
 }
 
 async function askBrain(event) {
@@ -176,6 +190,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 });
 
 els.capture.addEventListener("click", startCapture);
+els.stopCapture.addEventListener("click", stopCapture);
 els.resetCompile.addEventListener("click", resetSemanticCounter);
 els.tabAdd.addEventListener("click", () => setMode("add"));
 els.tabAsk.addEventListener("click", () => setMode("ask"));

@@ -23,7 +23,6 @@ PORT = 8765
 SEMANTIC_THRESHOLD = 10
 RECENT_JOB_TTL_SECONDS = 60 * 60
 RUNNING_JOB_TIMEOUT_SECONDS = 4 * 60
-MAX_OCR_SCREENSHOTS = 30
 STATE_FILE = capture.ROOT / ".aibrain" / "capture-state.json"
 JOBS: dict[str, dict] = {}
 JOBS_LOCK = threading.Lock()
@@ -35,8 +34,35 @@ def set_job(job_id: str, **updates: object) -> None:
         job = JOBS.setdefault(job_id, {})
         if job.get("timed_out") and updates.get("status") != "error":
             return
+        if job.get("cancelled") and updates.get("status") != "cancelled":
+            return
         job.update(updates)
         job["updated_at"] = time.time()
+
+
+def cancel_job(job_id: str) -> dict | None:
+    with JOBS_LOCK:
+        job = JOBS.get(job_id)
+        if not job:
+            return None
+        job.update(
+            status="cancelled",
+            ok=False,
+            cancelled=True,
+            message="Capture stopped by the user.",
+            updated_at=time.time(),
+        )
+        return dict(job)
+
+
+def job_is_cancelled(job_id: str) -> bool:
+    with JOBS_LOCK:
+        return bool(JOBS.get(job_id, {}).get("cancelled"))
+
+
+def stop_if_cancelled(job_id: str) -> None:
+    if job_is_cancelled(job_id):
+        raise InterruptedError("Capture stopped by the user.")
 
 
 def get_job(job_id: str) -> dict | None:
@@ -194,7 +220,7 @@ def ocr_screenshots(screenshots: list[dict]) -> str:
     script = capture.ROOT / "scripts" / "ocr_images.swift"
     with tempfile.TemporaryDirectory(prefix="aibrain-ocr-") as tmp_dir:
         paths: list[str] = []
-        for index, screenshot in enumerate(screenshots[:MAX_OCR_SCREENSHOTS]):
+        for index, screenshot in enumerate(screenshots):
             data_url = str(screenshot.get("dataUrl", ""))
             if not data_url:
                 continue
@@ -258,6 +284,7 @@ def article_payload_with_ocr(payload: dict) -> dict:
 def run_capture_job(job_id: str, payload: dict) -> None:
     url = str(payload.get("url", "")).strip()
     try:
+        stop_if_cancelled(job_id)
         if not url:
             raise capture.CaptureError("The extension did not send a URL.")
         if not capture.is_capture_url(url):
@@ -278,10 +305,13 @@ def run_capture_job(job_id: str, payload: dict) -> None:
             set_job(job_id, status="capturing", message="Fetching article page text.")
             path = capture.capture_article(url=url)
 
+        stop_if_cancelled(job_id)
         with INGEST_LOCK:
+            stop_if_cancelled(job_id)
             set_job(job_id, status="ingesting", message="Creating linked Wiki ingest note.")
             ingest_path = auto_ingest.ingest_source(path)
 
+            stop_if_cancelled(job_id)
             set_job(job_id, status="maintenance", message="Updating AI Brain catalog and source manifest.")
             capture.run_maintenance()
             subprocess.run(
@@ -295,13 +325,18 @@ def run_capture_job(job_id: str, payload: dict) -> None:
                 cwd=capture.ROOT,
                 check=True,
             )
+            stop_if_cancelled(job_id)
             subprocess.run(
                 ["python3", str(capture.WIKI_TOOL), "source-lint"],
                 cwd=capture.ROOT,
                 check=True,
             )
+        stop_if_cancelled(job_id)
         capture.run_ingest_command(path)
+        stop_if_cancelled(job_id)
         status = increment_capture_counter()
+    except InterruptedError:
+        return
     except (capture.CaptureError, subprocess.CalledProcessError, OSError, ValueError, json.JSONDecodeError) as exc:
         set_job(job_id, status="error", ok=False, error=str(exc), message=str(exc))
         return
@@ -395,6 +430,20 @@ class BridgeHandler(BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path == "/semantic-reset":
             self.send_json(200, {"ok": True, "brain_status": reset_capture_counter()})
+            return
+        if parsed.path == "/cancel":
+            try:
+                length = int(self.headers.get("Content-Length", "0") or "0")
+                body = self.rfile.read(length).decode("utf-8")
+                payload = json.loads(body) if body else {}
+                job_id = str(payload.get("job_id", "")).strip()
+            except (OSError, ValueError, json.JSONDecodeError):
+                job_id = ""
+            job = cancel_job(job_id)
+            if not job:
+                self.send_json(404, {"ok": False, "error": "unknown job"})
+                return
+            self.send_json(200, {"ok": True, "job": job})
             return
         if parsed.path != "/capture":
             self.send_json(404, {"ok": False, "error": "not found"})

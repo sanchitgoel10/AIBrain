@@ -4,6 +4,7 @@ const BRAIN_STATUS_URL = "http://127.0.0.1:8765/brain-status";
 const SEMANTIC_RESET_URL = "http://127.0.0.1:8765/semantic-reset";
 const ASK_URL = "http://127.0.0.1:8765/ask";
 const OPEN_SOURCE_URL = "http://127.0.0.1:8765/open-source";
+const CANCEL_URL = "http://127.0.0.1:8765/cancel";
 const ARTICLE_CAPTURE_TIMEOUT_MS = 120000;
 const ARTICLE_CAPTURE_MAX_BYTES = 64 * 1024 * 1024;
 const SCREENSHOT_PRIMARY_HOSTS = ["the-ken.com", "ft.com"];
@@ -17,9 +18,35 @@ let uiState = {
   ask: { status: "idle", query: "", answer: "", results: [], running: false },
   brainStatus: null
 };
+let captureRunId = 0;
+let captureAbortController = null;
+
+class CaptureCancelledError extends Error {
+  constructor() {
+    super("Capture stopped.");
+    this.name = "CaptureCancelledError";
+  }
+}
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function assertCaptureActive(runId) {
+  if (runId !== captureRunId) throw new CaptureCancelledError();
+}
+
+async function cancelBridgeJob(jobId) {
+  if (!jobId) return;
+  try {
+    await fetch(CANCEL_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ job_id: jobId })
+    });
+  } catch (_error) {
+    // Local cancellation still succeeds when the bridge is unavailable.
+  }
 }
 
 function isCaptureUrl(url) {
@@ -112,7 +139,7 @@ async function updateAsk(patch = {}) {
 
 function captureErrorMessage(error) {
   const message = String(error?.message || error || "Capture failed");
-  if (/cannot access contents|cannot access a chrome|missing host permission|manifest must request permission/i.test(message)) {
+  if (/cannot access contents|cannot access a chrome|missing host permission|manifest must request permission|all_urls.*activetab.*required/i.test(message)) {
     return "This browser page cannot be accessed. Open a regular http or https article page, then try again.";
   }
   if (/failed to fetch|networkerror|bridge returned|status returned/i.test(message)) {
@@ -401,7 +428,8 @@ async function getActiveTab() {
     .sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0))[0] || null;
 }
 
-async function captureArticleScreenshots(tab) {
+async function captureArticleScreenshots(tab, runId) {
+  assertCaptureActive(runId);
   const initialResults = await chrome.scripting.executeScript({
     target: { tabId: tab.id },
     func: articleScrollSnapshot
@@ -418,12 +446,14 @@ async function captureArticleScreenshots(tab) {
     let index = 0;
     while (Date.now() - startedAt < ARTICLE_CAPTURE_TIMEOUT_MS && capturedBytes < ARTICLE_CAPTURE_MAX_BYTES) {
       await sleep(index === 0 ? 250 : 500);
+      assertCaptureActive(runId);
       const snapshotResults = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
         func: articleScrollSnapshot
       });
       state = snapshotResults?.[0]?.result || state;
       await updateCapture("capturing", `Capturing article screenshot ${index + 1} for OCR.`);
+      assertCaptureActive(runId);
       const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" });
       const previous = screenshots[screenshots.length - 1];
       if (previous?.dataUrl === dataUrl) {
@@ -441,6 +471,7 @@ async function captureArticleScreenshots(tab) {
         func: advanceArticleScroll,
         args: [state.step || 650]
       });
+      assertCaptureActive(runId);
       state = advanceResults?.[0]?.result || state;
       if (state.moved) {
         stagnantMoves = 0;
@@ -473,8 +504,9 @@ async function captureArticleScreenshots(tab) {
   return screenshots;
 }
 
-async function getArticlePayload(tab) {
+async function getArticlePayload(tab, runId) {
   if (isYoutubeUrl(tab?.url || "")) return null;
+  assertCaptureActive(runId);
   let page = null;
   try {
     const results = await chrome.scripting.executeScript({
@@ -504,17 +536,18 @@ async function getArticlePayload(tab) {
 
   await updateCapture("capturing", "Direct text looked incomplete. Capturing screenshots for OCR.");
   page = page || { title: tab.title || "Article", author: "", date: "", excerpt: "", text: "", textLength: 0 };
-  page.screenshots = await captureArticleScreenshots(tab);
+  page.screenshots = await captureArticleScreenshots(tab, runId);
   page.extractionMethod = "screenshot-ocr";
   page.discardDomTextForOcr = useScreenshotAsPrimary;
   page.captureDecision = "fallback-ocr";
   return page;
 }
 
-async function pollJob(jobId) {
+async function pollJob(jobId, runId, signal) {
   for (let attempt = 0; attempt < 360; attempt += 1) {
     await sleep(1500);
-    const response = await fetch(`${STATUS_URL}?job_id=${encodeURIComponent(jobId)}`);
+    assertCaptureActive(runId);
+    const response = await fetch(`${STATUS_URL}?job_id=${encodeURIComponent(jobId)}`, { signal });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok || !payload.ok) {
       throw new Error(payload.error || `Status returned HTTP ${response.status}`);
@@ -532,6 +565,7 @@ async function pollJob(jobId) {
     if (job.status === "error") {
       throw new Error(job.error || job.message || "Capture failed");
     }
+    if (job.status === "cancelled") throw new CaptureCancelledError();
   }
   throw new Error("Capture is still running after 9 minutes. Check the bridge terminal.");
 }
@@ -586,9 +620,14 @@ async function startCapture() {
     return;
   }
 
+  const runId = ++captureRunId;
+  const abortController = new AbortController();
+  captureAbortController = abortController;
+  let bridgeJobId = "";
   try {
     await updateCapture("queued", "Preparing active tab.", { tabUrl: url, tabTitle: tab.title || "" });
-    const page = await getArticlePayload(tab);
+    const page = await getArticlePayload(tab, runId);
+    assertCaptureActive(runId);
     if (page) {
       const screenshotCount = Array.isArray(page.screenshots) ? page.screenshots.length : 0;
       if (screenshotCount) {
@@ -600,16 +639,39 @@ async function startCapture() {
     const response = await fetch(BRIDGE_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url, title: tab.title || "", page })
+      body: JSON.stringify({ url, title: tab.title || "", page }),
+      signal: abortController.signal
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok || !payload.ok) {
       throw new Error(payload.error || `Bridge returned HTTP ${response.status}`);
     }
-    await pollJob(payload.job_id);
+    bridgeJobId = payload.job_id;
+    assertCaptureActive(runId);
+    await updateCapture("queued", "Capture queued in the local bridge.", { bridgeJobId });
+    await pollJob(bridgeJobId, runId, abortController.signal);
   } catch (error) {
+    if (error instanceof CaptureCancelledError || error?.name === "AbortError" || runId !== captureRunId) {
+      await cancelBridgeJob(bridgeJobId);
+      return;
+    }
     await updateCapture("error", captureErrorMessage(error), { running: false });
+  } finally {
+    if (captureAbortController === abortController) captureAbortController = null;
   }
+}
+
+async function stopCapture() {
+  const jobId = uiState.capture?.bridgeJobId || "";
+  captureRunId += 1;
+  if (jobId) captureAbortController?.abort();
+  await updateCapture("cancelled", "Capture stopped.", {
+    running: false,
+    bridgeJobId: "",
+    path: "",
+    ingestPath: ""
+  });
+  await cancelBridgeJob(jobId);
 }
 
 async function askBrain(query) {
@@ -701,6 +763,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
     if (message?.type === "start-capture") {
       startCapture();
+      sendResponse({ ok: true, state: uiState });
+      return;
+    }
+    if (message?.type === "stop-capture") {
+      await stopCapture();
       sendResponse({ ok: true, state: uiState });
       return;
     }

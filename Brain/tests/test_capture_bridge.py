@@ -4,6 +4,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 SCRIPT_DIR = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPT_DIR))
@@ -104,6 +105,35 @@ class CaptureBridgeTests(unittest.TestCase):
         self.assertEqual(job["status"], "error")
         self.assertTrue(job["timed_out"])
         self.assertIn("timed out", job["message"])
+
+    def test_cancelled_job_cannot_return_to_running_state(self) -> None:
+        capture_bridge.JOBS.clear()
+        self.addCleanup(capture_bridge.JOBS.clear)
+        capture_bridge.set_job("job", status="capturing", message="working")
+
+        cancelled = capture_bridge.cancel_job("job")
+        capture_bridge.set_job("job", status="ingesting", message="should not resume")
+
+        self.assertEqual(cancelled["status"], "cancelled")
+        self.assertTrue(cancelled["cancelled"])
+        self.assertEqual(capture_bridge.get_job("job")["status"], "cancelled")
+
+    def test_ocr_uses_every_captured_screenshot(self) -> None:
+        original_run = capture_bridge.subprocess.run
+        observed = {}
+
+        def fake_run(args, **_kwargs):
+            observed["args"] = args
+            return SimpleNamespace(returncode=0, stdout="article text", stderr="")
+
+        capture_bridge.subprocess.run = fake_run
+        self.addCleanup(setattr, capture_bridge.subprocess, "run", original_run)
+        screenshots = [{"dataUrl": "data:image/png;base64,AA=="} for _ in range(35)]
+
+        text = capture_bridge.ocr_screenshots(screenshots)
+
+        self.assertEqual(text, "article text")
+        self.assertEqual(len(observed["args"][2:]), 35)
 
     def test_forced_ocr_replaces_stale_dom_text(self) -> None:
         original_ocr = capture_bridge.ocr_screenshots
