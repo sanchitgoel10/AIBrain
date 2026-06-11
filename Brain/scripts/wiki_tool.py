@@ -24,6 +24,8 @@ MANIFEST = SCHEMA / "source-manifest.jsonl"
 CAPTURE_STATE = ROOT / ".aibrain" / "capture-state.json"
 ALLOWED_TAGS = {"topic", "concept", "entity", "project", "log"}
 WIKI_FOLDERS = ["Topics", "Concepts", "Entities", "Projects", "Logs"]
+SEMANTIC_FOLDERS = {"Topics", "Concepts", "Entities", "Projects"}
+SHALLOW_WIKI_PATHS = {"Wiki/Topics/captured-sources.md"}
 REQUIRED_FOLDERS = [
     "Raw/Sources",
     "Raw/Files",
@@ -317,6 +319,40 @@ def coverage_map() -> dict[str, list[str]]:
     return coverage
 
 
+def semantic_coverage_map() -> dict[str, list[str]]:
+    coverage: dict[str, list[str]] = {}
+    for path in wiki_note_paths():
+        path_rel = rel(path)
+        parts = path_rel.split("/")
+        if len(parts) < 3 or parts[1] not in SEMANTIC_FOLDERS or path_rel in SHALLOW_WIKI_PATHS:
+            continue
+        fm, _body = read_frontmatter(path)
+        sources = fm.get("sources", [])
+        if not isinstance(sources, list):
+            continue
+        for source in sources:
+            coverage.setdefault(source, []).append(path_rel)
+    return coverage
+
+
+def semantic_coverage_rows() -> list[dict]:
+    coverage = semantic_coverage_map()
+    rows = []
+    for path in source_paths():
+        fm, body = read_frontmatter(path)
+        source_rel = rel(path)
+        covered_by = sorted(coverage.get(source_rel, []))
+        rows.append(
+            {
+                "path": source_rel,
+                "title": title_for(path, fm, body),
+                "semantic_compiled": bool(covered_by),
+                "semantic_covered_by": covered_by,
+            }
+        )
+    return rows
+
+
 def cmd_source_scan(args) -> int:
     coverage = coverage_map()
     rows = []
@@ -366,6 +402,27 @@ def cmd_source_coverage(_args) -> int:
     for path in source_paths():
         covered_by = coverage.get(rel(path), [])
         print(json.dumps({"path": rel(path), "covered_by": covered_by}, sort_keys=True))
+    return 0
+
+
+def cmd_semantic_pending(args) -> int:
+    rows = semantic_coverage_rows()
+    pending = [row for row in rows if not row["semantic_compiled"]]
+    payload = {
+        "total_sources": len(rows),
+        "semantic_compiled": len(rows) - len(pending),
+        "semantic_pending": len(pending),
+        "pending": pending,
+    }
+    if args.json:
+        print(json.dumps(payload, sort_keys=True))
+    else:
+        print(
+            f"semantic coverage: {payload['semantic_compiled']}/{payload['total_sources']} compiled; "
+            f"{payload['semantic_pending']} pending"
+        )
+        for row in pending:
+            print(row["path"])
     return 0
 
 
@@ -668,6 +725,9 @@ def main() -> int:
     sub.add_parser("source-lint").set_defaults(func=cmd_source_lint)
     sub.add_parser("source-delta").set_defaults(func=cmd_source_delta)
     sub.add_parser("source-coverage").set_defaults(func=cmd_source_coverage)
+    semantic_pending = sub.add_parser("semantic-pending")
+    semantic_pending.add_argument("--json", action="store_true")
+    semantic_pending.set_defaults(func=cmd_semantic_pending)
     sub.add_parser("reset-capture-counter").set_defaults(func=cmd_reset_capture_counter)
     search = sub.add_parser("search-catalog")
     search.add_argument("--query", required=True)

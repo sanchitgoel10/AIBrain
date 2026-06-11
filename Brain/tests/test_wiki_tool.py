@@ -113,6 +113,34 @@ Uses [[source|Source]] and [[other|Other]].
         )
         return path
 
+    def write_shallow_ingest_notes(self) -> None:
+        ingest = wiki_tool.WIKI / "Logs" / "source-ingest.md"
+        ingest.write_text(
+            """---
+tags:
+  - "log"
+sources:
+  - "Raw/Sources/source.md"
+source_count: 1
+---
+# Source Ingest
+""",
+            encoding="utf-8",
+        )
+        hub = wiki_tool.WIKI / "Topics" / "captured-sources.md"
+        hub.write_text(
+            """---
+tags:
+  - "topic"
+sources:
+  - "Raw/Sources/source.md"
+source_count: 1
+---
+# Captured Sources
+""",
+            encoding="utf-8",
+        )
+
     def test_build_creates_catalog_and_indexes(self) -> None:
         self.write_source()
         self.write_wiki_note()
@@ -155,6 +183,41 @@ Uses [[source|Source]] and [[other|Other]].
             result = wiki_tool.cmd_source_lint(argparse.Namespace())
 
         self.assertEqual(result, 1)
+
+    def test_semantic_pending_ignores_ingest_log_and_capture_hub(self) -> None:
+        self.write_source()
+        self.write_shallow_ingest_notes()
+
+        rows = wiki_tool.semantic_coverage_rows()
+
+        self.assertEqual(len(rows), 1)
+        self.assertFalse(rows[0]["semantic_compiled"])
+        self.assertEqual(rows[0]["semantic_covered_by"], [])
+
+    def test_semantic_pending_accepts_durable_wiki_note(self) -> None:
+        self.write_source()
+        self.write_shallow_ingest_notes()
+        self.write_wiki_note()
+
+        rows = wiki_tool.semantic_coverage_rows()
+
+        self.assertTrue(rows[0]["semantic_compiled"])
+        self.assertEqual(rows[0]["semantic_covered_by"], ["Wiki/Concepts/test-concept.md"])
+
+    def test_semantic_pending_json_reports_exact_queue(self) -> None:
+        self.write_source()
+        self.write_shallow_ingest_notes()
+        stdout = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout):
+            result = wiki_tool.cmd_semantic_pending(argparse.Namespace(json=True))
+
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(result, 0)
+        self.assertEqual(payload["total_sources"], 1)
+        self.assertEqual(payload["semantic_compiled"], 0)
+        self.assertEqual(payload["semantic_pending"], 1)
+        self.assertEqual(payload["pending"][0]["path"], "Raw/Sources/source.md")
 
     def test_ask_returns_relevant_compiled_note(self) -> None:
         self.write_source()
