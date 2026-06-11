@@ -17,13 +17,12 @@ from pathlib import Path
 import capture_current_page as capture
 import auto_ingest
 import brain_ask
+import wiki_tool
 
 HOST = "127.0.0.1"
 PORT = 8765
-SEMANTIC_THRESHOLD = 10
 RECENT_JOB_TTL_SECONDS = 60 * 60
 RUNNING_JOB_TIMEOUT_SECONDS = 4 * 60
-STATE_FILE = capture.ROOT / ".aibrain" / "capture-state.json"
 JOBS: dict[str, dict] = {}
 JOBS_LOCK = threading.Lock()
 INGEST_LOCK = threading.Lock()
@@ -109,48 +108,13 @@ def mark_job_timed_out(job: dict) -> None:
     job["updated_at"] = time.time()
 
 
-def load_state() -> dict:
-    if not STATE_FILE.exists():
-        return {"captures_since_compile": 0, "last_compile_reset_at": 0}
-    try:
-        state = json.loads(STATE_FILE.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {"captures_since_compile": 0, "last_compile_reset_at": 0}
-    return {
-        "captures_since_compile": int(state.get("captures_since_compile", 0) or 0),
-        "last_compile_reset_at": float(state.get("last_compile_reset_at", 0) or 0),
-    }
-
-
-def save_state(state: dict) -> None:
-    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    STATE_FILE.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-
-
-def increment_capture_counter() -> dict:
-    state = load_state()
-    state["captures_since_compile"] = int(state.get("captures_since_compile", 0)) + 1
-    save_state(state)
-    return brain_status()
-
-
-def reset_capture_counter() -> dict:
-    state = load_state()
-    state["captures_since_compile"] = 0
-    state["last_compile_reset_at"] = time.time()
-    save_state(state)
-    return brain_status()
-
-
 def brain_status() -> dict:
-    state = load_state()
-    count = int(state.get("captures_since_compile", 0))
+    rows = wiki_tool.semantic_coverage_rows()
+    pending = [row for row in rows if not row["semantic_compiled"]]
     return {
-        "captures_since_compile": count,
-        "semantic_threshold": SEMANTIC_THRESHOLD,
-        "semantic_due": count >= SEMANTIC_THRESHOLD,
-        "remaining_until_due": max(SEMANTIC_THRESHOLD - count, 0),
-        "last_compile_reset_at": state.get("last_compile_reset_at", 0),
+        "total_sources": len(rows),
+        "semantic_compiled": len(rows) - len(pending),
+        "semantic_pending": len(pending),
     }
 
 
@@ -334,7 +298,7 @@ def run_capture_job(job_id: str, payload: dict) -> None:
         stop_if_cancelled(job_id)
         capture.run_ingest_command(path)
         stop_if_cancelled(job_id)
-        status = increment_capture_counter()
+        status = brain_status()
     except InterruptedError:
         return
     except (capture.CaptureError, subprocess.CalledProcessError, OSError, ValueError, json.JSONDecodeError) as exc:
@@ -428,9 +392,6 @@ class BridgeHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         parsed = urllib.parse.urlparse(self.path)
-        if parsed.path == "/semantic-reset":
-            self.send_json(200, {"ok": True, "brain_status": reset_capture_counter()})
-            return
         if parsed.path == "/cancel":
             try:
                 length = int(self.headers.get("Content-Length", "0") or "0")

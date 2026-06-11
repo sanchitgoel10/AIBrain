@@ -27,7 +27,6 @@ class WikiToolTests(unittest.TestCase):
             "SCHEMA": wiki_tool.SCHEMA,
             "CATALOG": wiki_tool.CATALOG,
             "MANIFEST": wiki_tool.MANIFEST,
-            "CAPTURE_STATE": wiki_tool.CAPTURE_STATE,
         }
         wiki_tool.ROOT = self.root
         wiki_tool.RAW = self.root / "Raw" / "Sources"
@@ -35,7 +34,6 @@ class WikiToolTests(unittest.TestCase):
         wiki_tool.SCHEMA = self.root / "Schema"
         wiki_tool.CATALOG = wiki_tool.WIKI / "catalog.jsonl"
         wiki_tool.MANIFEST = wiki_tool.SCHEMA / "source-manifest.jsonl"
-        wiki_tool.CAPTURE_STATE = self.root / ".aibrain" / "capture-state.json"
         self.addCleanup(self.restore_globals)
         for folder in ["Raw/Sources", "Wiki/Concepts", "Wiki/Topics", "Wiki/Entities", "Wiki/Projects", "Wiki/Logs", "Schema"]:
             (self.root / folder).mkdir(parents=True, exist_ok=True)
@@ -284,21 +282,6 @@ tags:
         self.assertEqual(fm["source_count"], 1)
         self.assertNotIn("[[source", body)
         self.assertIn("[[other", body)
-
-    def test_reset_capture_counter_sets_count_to_zero(self) -> None:
-        wiki_tool.CAPTURE_STATE.parent.mkdir(parents=True)
-        wiki_tool.CAPTURE_STATE.write_text(
-            json.dumps({"captures_since_compile": 12, "last_compile_reset_at": 1}) + "\n",
-            encoding="utf-8",
-        )
-
-        state = wiki_tool.reset_capture_counter()
-
-        self.assertEqual(state["captures_since_compile"], 0)
-        self.assertGreater(state["last_compile_reset_at"], 1)
-        saved = json.loads(wiki_tool.CAPTURE_STATE.read_text(encoding="utf-8"))
-        self.assertEqual(saved["captures_since_compile"], 0)
-
 
 if __name__ == "__main__":
     unittest.main()

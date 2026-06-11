@@ -21,7 +21,6 @@ WIKI = ROOT / "Wiki"
 SCHEMA = ROOT / "Schema"
 CATALOG = WIKI / "catalog.jsonl"
 MANIFEST = SCHEMA / "source-manifest.jsonl"
-CAPTURE_STATE = ROOT / ".aibrain" / "capture-state.json"
 ALLOWED_TAGS = {"topic", "concept", "entity", "project", "log"}
 WIKI_FOLDERS = ["Topics", "Concepts", "Entities", "Projects", "Logs"]
 SEMANTIC_FOLDERS = {"Topics", "Concepts", "Entities", "Projects"}
@@ -190,20 +189,6 @@ def read_jsonl(path: Path) -> list[dict]:
         if line.strip():
             rows.append(json.loads(line))
     return rows
-
-
-def reset_capture_counter() -> dict:
-    state: dict = {}
-    if CAPTURE_STATE.exists():
-        try:
-            state = json.loads(CAPTURE_STATE.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            state = {}
-    state["captures_since_compile"] = 0
-    state["last_compile_reset_at"] = dt.datetime.now().timestamp()
-    CAPTURE_STATE.parent.mkdir(parents=True, exist_ok=True)
-    CAPTURE_STATE.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    return state
 
 
 def build_indexes(rows: list[dict]) -> None:
@@ -423,12 +408,6 @@ def cmd_semantic_pending(args) -> int:
         )
         for row in pending:
             print(row["path"])
-    return 0
-
-
-def cmd_reset_capture_counter(_args) -> int:
-    state = reset_capture_counter()
-    print(json.dumps(state, sort_keys=True))
     return 0
 
 
@@ -728,7 +707,6 @@ def main() -> int:
     semantic_pending = sub.add_parser("semantic-pending")
     semantic_pending.add_argument("--json", action="store_true")
     semantic_pending.set_defaults(func=cmd_semantic_pending)
-    sub.add_parser("reset-capture-counter").set_defaults(func=cmd_reset_capture_counter)
     search = sub.add_parser("search-catalog")
     search.add_argument("--query", required=True)
     search.set_defaults(func=cmd_search_catalog)

@@ -18,35 +18,39 @@ class CaptureBridgeTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
         self.addCleanup(self.tmp.cleanup)
-        self.original_state_file = capture_bridge.STATE_FILE
         self.original_root = capture.ROOT
-        capture_bridge.STATE_FILE = self.root / ".aibrain" / "capture-state.json"
+        self.original_wiki_root = capture_bridge.wiki_tool.ROOT
+        self.original_wiki_raw = capture_bridge.wiki_tool.RAW
+        self.original_wiki_wiki = capture_bridge.wiki_tool.WIKI
         capture.ROOT = self.root
+        capture_bridge.wiki_tool.ROOT = self.root
+        capture_bridge.wiki_tool.RAW = self.root / "Raw" / "Sources"
+        capture_bridge.wiki_tool.WIKI = self.root / "Wiki"
+        for folder in ["Raw/Sources", "Wiki/Concepts", "Wiki/Topics", "Wiki/Entities", "Wiki/Projects", "Wiki/Logs"]:
+            (self.root / folder).mkdir(parents=True, exist_ok=True)
         self.addCleanup(self.restore_globals)
 
     def restore_globals(self) -> None:
-        capture_bridge.STATE_FILE = self.original_state_file
         capture.ROOT = self.original_root
+        capture_bridge.wiki_tool.ROOT = self.original_wiki_root
+        capture_bridge.wiki_tool.RAW = self.original_wiki_raw
+        capture_bridge.wiki_tool.WIKI = self.original_wiki_wiki
 
-    def test_capture_counter_increments_and_resets(self) -> None:
-        self.assertEqual(capture_bridge.brain_status()["captures_since_compile"], 0)
+    def test_brain_status_reports_deterministic_semantic_coverage(self) -> None:
+        source = capture_bridge.wiki_tool.RAW / "source.md"
+        source.write_text("# Source\n", encoding="utf-8")
 
-        for _ in range(capture_bridge.SEMANTIC_THRESHOLD):
-            status = capture_bridge.increment_capture_counter()
+        pending = capture_bridge.brain_status()
 
-        self.assertEqual(status["captures_since_compile"], capture_bridge.SEMANTIC_THRESHOLD)
-        self.assertTrue(status["semantic_due"])
-
-        reset = capture_bridge.reset_capture_counter()
-
-        self.assertEqual(reset["captures_since_compile"], 0)
-        self.assertFalse(reset["semantic_due"])
+        self.assertEqual(pending["total_sources"], 1)
+        self.assertEqual(pending["semantic_compiled"], 0)
+        self.assertEqual(pending["semantic_pending"], 1)
 
     def test_search_brain_returns_raw_and_wiki_matches(self) -> None:
         raw = self.root / "Raw" / "Sources"
         wiki = self.root / "Wiki" / "Concepts"
-        raw.mkdir(parents=True)
-        wiki.mkdir(parents=True)
+        raw.mkdir(parents=True, exist_ok=True)
+        wiki.mkdir(parents=True, exist_ok=True)
         (raw / "source.md").write_text("# Source\n\nA captured note about maritime safety.", encoding="utf-8")
         (wiki / "concept.md").write_text("# Concept\n\nReusable idea about maritime safety.", encoding="utf-8")
 
@@ -59,7 +63,7 @@ class CaptureBridgeTests(unittest.TestCase):
 
     def test_ask_brain_returns_answer_json_shape(self) -> None:
         wiki = self.root / "Wiki" / "Concepts"
-        wiki.mkdir(parents=True)
+        wiki.mkdir(parents=True, exist_ok=True)
         (wiki / "concept.md").write_text("# Concept\n\nReusable idea about maritime safety.", encoding="utf-8")
 
         original_answer = capture_bridge.brain_ask.answer

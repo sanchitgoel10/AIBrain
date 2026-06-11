@@ -59,11 +59,11 @@ Uncached YouTube videos can take a few minutes while Transcribe resolves and tra
 
 For articles, the extension first extracts visible page text from the browser tab and sends it to the bridge. This is important for logged-in or subscription pages, because Python fetching the URL directly may only see a logged-out shell.
 
-If browser text extraction is too short, the extension scrolls the active tab and captures up to 10 screenshots. The local bridge runs macOS Vision OCR on those screenshots and saves the extracted text. This mirrors the way browser-native assistants can reason from the rendered page instead of only from fetchable HTML.
+If browser text extraction is too short, the extension scrolls the active tab and captures screenshots until it detects the article end. The local bridge runs macOS Vision OCR on every captured screenshot and saves the extracted text. This mirrors the way browser-native assistants can reason from the rendered page instead of only from fetchable HTML.
 
 After capture, the bridge automatically creates a deterministic Wiki ingest log under `Wiki/Logs/`, adds an Obsidian backlink in the Raw note, rebuilds indexes, and updates the source manifest with covered sources accepted as processed.
 
-The extension also tracks how many captures have happened since the last manual semantic compile. At 10 captures, it reminds the user to run Codex semantic compile manually. After the user completes that manual pass, the popup reset button clears the counter.
+The extension shows the deterministic number of Raw sources still waiting for durable semantic compilation. The daily automation processes the complete pending queue regardless of how many sources were added.
 
 The `Ask` tab in the popup currently performs shallow local search over Raw and Wiki Markdown through the bridge. It does not call an LLM yet.
 

@@ -53,9 +53,9 @@ Expected:
 - Clicking `ATB` changes status while the capture is running.
 - Success shows a completed/green state.
 - Failure shows an error state with a readable message.
-- The semantic compile counter increases after successful captures.
-- At 10 captures, the popup shows a manual semantic compile reminder.
-- After running manual Codex semantic compile, clicking `Reset` clears the counter.
+- The Semantic compile card shows the deterministic number of Raw sources still pending durable compilation.
+- After a successful daily compile, the pending count reflects any sources not linked from durable Wiki notes.
+- No capture counter, threshold, or Reset control is shown.
 
 ## C. YouTube Capture
 

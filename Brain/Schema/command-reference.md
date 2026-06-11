@@ -48,12 +48,6 @@ python3 scripts/wiki_tool.py semantic-pending --json
 Reports the deterministic deep-semantic queue. A source counts as semantically compiled only when it is linked from a durable note under `Wiki/Concepts/`, `Wiki/Topics/`, `Wiki/Entities/`, or `Wiki/Projects/`. Automatic ingest logs and `Wiki/Topics/captured-sources.md` do not count.
 
 ```bash
-python3 scripts/wiki_tool.py reset-capture-counter
-```
-
-Resets `.aibrain/capture-state.json` so `captures_since_compile` is `0`. Use only after a successful semantic compile pass and only when `semantic-pending` reports zero pending sources.
-
-```bash
 python3 scripts/wiki_tool.py search-catalog --query "llm wiki"
 ```
 

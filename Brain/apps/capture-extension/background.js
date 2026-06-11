@@ -1,7 +1,6 @@
 const BRIDGE_URL = "http://127.0.0.1:8765/capture";
 const STATUS_URL = "http://127.0.0.1:8765/status";
 const BRAIN_STATUS_URL = "http://127.0.0.1:8765/brain-status";
-const SEMANTIC_RESET_URL = "http://127.0.0.1:8765/semantic-reset";
 const ASK_URL = "http://127.0.0.1:8765/ask";
 const OPEN_SOURCE_URL = "http://127.0.0.1:8765/open-source";
 const CANCEL_URL = "http://127.0.0.1:8765/cancel";
@@ -694,13 +693,6 @@ async function askBrain(query) {
   }
 }
 
-async function resetSemanticCounter() {
-  const response = await fetch(SEMANTIC_RESET_URL, { method: "POST" });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok || !payload.ok) throw new Error(payload.error || "Reset failed");
-  await saveState({ brainStatus: payload.brain_status || null });
-}
-
 async function revealSource(path) {
   if (!path) return;
   await fetch(`${OPEN_SOURCE_URL}?path=${encodeURIComponent(path)}`);
@@ -773,11 +765,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
     if (message?.type === "ask") {
       askBrain(String(message.query || "").trim());
-      sendResponse({ ok: true, state: uiState });
-      return;
-    }
-    if (message?.type === "reset-semantic") {
-      await resetSemanticCounter();
       sendResponse({ ok: true, state: uiState });
       return;
     }

@@ -16,7 +16,6 @@ const els = {
   capture: document.getElementById("capture"),
   kind: document.getElementById("kind"),
   progress: document.getElementById("progressBar"),
-  resetCompile: document.getElementById("resetCompile"),
   status: document.getElementById("status"),
   stopCapture: document.getElementById("stopCapture"),
   tabAdd: document.getElementById("tabAdd"),
@@ -57,14 +56,12 @@ function updateBrainStatus(status) {
     els.compileStatus.textContent = "Bridge not available.";
     return;
   }
-  const count = status.captures_since_compile || 0;
-  const threshold = status.semantic_threshold || 10;
-  els.compileCard.classList.toggle("due", Boolean(status.semantic_due));
-  if (status.semantic_due) {
-    els.compileStatus.textContent = `${count}/${threshold} captures. Run Codex semantic compile.`;
-  } else {
-    els.compileStatus.textContent = `${count}/${threshold} captures since semantic compile.`;
-  }
+  const pending = status.semantic_pending || 0;
+  const total = status.total_sources || 0;
+  els.compileCard.classList.toggle("due", pending > 0);
+  els.compileStatus.textContent = pending
+    ? `${pending} of ${total} sources pending daily compile.`
+    : `All ${total} sources semantically compiled.`;
 }
 
 function renderAskResults(results) {
@@ -166,18 +163,6 @@ async function askBrain(event) {
   if (response?.ok && response.state) render(response.state);
 }
 
-async function resetSemanticCounter() {
-  els.resetCompile.disabled = true;
-  try {
-    const response = await sendMessage({ type: "reset-semantic" });
-    if (response?.ok && response.state) render(response.state);
-  } catch (_error) {
-    els.compileStatus.textContent = "Could not reset counter.";
-  } finally {
-    els.resetCompile.disabled = false;
-  }
-}
-
 async function revealSource(path) {
   if (!path) return;
   await sendMessage({ type: "reveal-source", path });
@@ -191,7 +176,6 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 
 els.capture.addEventListener("click", startCapture);
 els.stopCapture.addEventListener("click", stopCapture);
-els.resetCompile.addEventListener("click", resetSemanticCounter);
 els.tabAdd.addEventListener("click", () => setMode("add"));
 els.tabAsk.addEventListener("click", () => setMode("ask"));
 els.askForm.addEventListener("submit", askBrain);

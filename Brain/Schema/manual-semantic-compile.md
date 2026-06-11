@@ -4,16 +4,14 @@ Use this workflow when the extension says semantic compile is due, or whenever a
 
 ## Scheduled Compile
 
-A Codex automation named `AI Brain Semantic Compile` runs this vault daily. It uses `python3 scripts/wiki_tool.py semantic-pending --json` as its source of truth and compiles up to 10 pending sources per run. It reads `.aibrain/capture-state.json` only to report `captures_since_compile`.
+A Codex automation named `AI Brain Semantic Compile` runs this vault daily. It uses `python3 scripts/wiki_tool.py semantic-pending --json` as its source of truth and compiles every pending source found when the run starts.
 
-The counter is a reminder/manual-run signal, not a measure of uncompiled files and not a scheduled automation gate. Repeated clicks and manual resets cannot remove a source from the semantic queue.
-
-The automation resets `captures_since_compile` only when all checks pass and `semantic-pending` reports zero remaining sources.
+There is no capture counter, threshold, or batch limit. After the existing backlog is cleared, the daily pending queue naturally consists of every source added since the previous successful run.
 
 ## Prompt For Codex
 
 ```text
-Use my AI Brain. Run `python3 scripts/wiki_tool.py semantic-pending --json` and treat its pending list as the only semantic compile queue. Search Wiki/catalog.jsonl first. Compile up to 10 pending sources into durable Wiki notes under Wiki/Concepts, Wiki/Topics, Wiki/Entities, or Wiki/Projects. Keep every claim linked to the Raw source in sources, keep source_count accurate, add Obsidian wikilinks between Raw and Wiki notes, rebuild indexes, update the source manifest, run lint/source-lint/audit, rerun semantic-pending, and summarize what changed. Reset the capture counter only when the final pending count is zero.
+Use my AI Brain. Run `python3 scripts/wiki_tool.py semantic-pending --json` and treat its pending list as the only semantic compile queue. Search Wiki/catalog.jsonl first. Compile every pending source into durable Wiki notes under Wiki/Concepts, Wiki/Topics, Wiki/Entities, or Wiki/Projects. Keep every claim linked to the Raw source in sources, keep source_count accurate, add Obsidian wikilinks between Raw and Wiki notes, rebuild indexes, update the source manifest, run lint/source-lint/audit, rerun semantic-pending, and summarize what changed.
 ```
 
 ## Manual Steps
@@ -31,7 +29,7 @@ python3 scripts/audit_public.py
 python3 scripts/wiki_tool.py semantic-pending
 ```
 
-Run `python3 scripts/wiki_tool.py reset-capture-counter` only if the final semantic pending count is zero.
+The run is complete only when the final semantic pending count is zero.
 
 ## Result
 
