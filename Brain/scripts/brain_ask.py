@@ -293,7 +293,9 @@ class BrainAskEngine:
 
         if not answer:
             if {"llm_not_configured", "llm_unavailable", "llm_bad_answer", "llm_answer_failed"} & set(warnings):
-                answer = "I found matching Brain sources, but the hosted LLM is unavailable or not configured yet."
+                answer = deterministic_evidence_answer(selected)
+                if answer and selected:
+                    answer_source_ids = [selected[0]["id"]]
             else:
                 answer = NO_ANSWER
                 warnings.append("low_confidence")
@@ -376,7 +378,8 @@ class BrainAskEngine:
                     (fts_query, limit),
                 ).fetchall()
         terms = query_terms(query)
-        return [row_to_result(row, terms) for row in rows]
+        results = [row_to_result(row, terms) for row in rows]
+        return sorted(results, key=lambda item: (-float(item["score"]), item["path"], item["chunk_index"]))
 
     def ensure_index(self) -> None:
         self.config.index_path.parent.mkdir(parents=True, exist_ok=True)
@@ -669,6 +672,7 @@ def escape_fts_token(token: str) -> str:
 def row_to_result(row: sqlite3.Row, terms: list[str]) -> dict:
     text = str(row["text"] or "")
     rank = float(row["rank"] or 0)
+    lexical_score = term_specificity_score(text, str(row["title"] or ""), terms)
     return {
         "id": "",
         "path": row["path"],
@@ -677,7 +681,7 @@ def row_to_result(row: sqlite3.Row, terms: list[str]) -> dict:
         "chunk_index": int(row["chunk_index"]),
         "snippet": best_snippet(text, terms),
         "text": text[:MAX_PROMPT_SNIPPET_CHARS],
-        "score": round(max(-rank, 0.0), 8),
+        "score": round(max(-rank, 0.0) + lexical_score, 8),
     }
 
 
@@ -686,10 +690,14 @@ def best_snippet(text: str, terms: list[str], max_chars: int = MAX_RESULT_SNIPPE
     if not compact:
         return ""
     lower = compact.lower()
-    positions = [lower.find(term.lower()) for term in terms if lower.find(term.lower()) >= 0]
-    if not positions:
+    matches = [
+        (len(term), lower.find(term.lower()))
+        for term in terms
+        if lower.find(term.lower()) >= 0
+    ]
+    if not matches:
         return compact[:max_chars].rstrip()
-    center = min(positions)
+    _length, center = max(matches, key=lambda item: (item[0], -item[1]))
     start = max(center - max_chars // 3, 0)
     end = min(start + max_chars, len(compact))
     snippet = compact[start:end].strip()
@@ -698,6 +706,25 @@ def best_snippet(text: str, terms: list[str], max_chars: int = MAX_RESULT_SNIPPE
     if end < len(compact):
         snippet = f"{snippet}..."
     return snippet
+
+
+def term_specificity_score(text: str, title: str, terms: list[str]) -> float:
+    haystack = f"{title}\n{text}".lower()
+    matched = [term for term in terms if term.lower() in haystack]
+    if not matched:
+        return 0.0
+    longest = max(len(term) for term in matched)
+    coverage = len(matched) / max(len(terms), 1)
+    return float(longest) + coverage
+
+
+def deterministic_evidence_answer(candidates: list[dict]) -> str:
+    if not candidates:
+        return NO_ANSWER
+    snippet = str(candidates[0].get("snippet", "")).strip()
+    if not snippet:
+        return NO_ANSWER
+    return f"Most relevant Brain passage: {snippet}"
 
 
 def prompt_candidates(candidates: list[dict], *, max_chars: int) -> list[dict]:

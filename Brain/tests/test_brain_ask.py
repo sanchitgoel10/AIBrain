@@ -99,7 +99,8 @@ image by indicating locations instead of only describing the scene in text.
 
         result = brain_ask.BrainAskEngine(self.root, ollama=BadJsonOllama()).ask("compiled claim")
 
-        self.assertIn("matching Brain sources", result["answer"])
+        self.assertIn("Most relevant Brain passage", result["answer"])
+        self.assertIn("Compiled claim", result["answer"])
         self.assertEqual(result["engine"], "sqlite-fts5")
         self.assertEqual(result["results"][0]["path"], "Wiki/Concepts/test.md")
 
@@ -121,7 +122,52 @@ image by indicating locations instead of only describing the scene in text.
 
         self.assertEqual(result["engine"], "sqlite-fts5")
         self.assertIn("llm_not_configured", result["warnings"])
+        self.assertIn("Compiled claim", result["answer"])
         self.assertEqual(result["results"][0]["path"], "Wiki/Concepts/test.md")
+
+    def test_specific_query_term_outranks_generic_matches_and_anchors_snippet(self) -> None:
+        self.write_note(
+            "Raw/Sources/interview.md",
+            """# Interview
+
+Do you see parallels between yourself and Oppenheimer?
+The figure I most identified with was Leo Szilard, who first had the idea of a chain reaction.
+""",
+        )
+        self.write_note(
+            "Raw/Sources/generic.md",
+            """# Generic
+
+He thinks of himself as someone who can compare several ordinary options.
+""",
+        )
+
+        results = brain_ask.search(
+            "What did Dario compare himself to when asked whether he thinks of himself as Oppenheimer?",
+            root=self.root,
+            limit=3,
+        )
+
+        self.assertEqual(results[0]["path"], "Raw/Sources/interview.md")
+        self.assertIn("Oppenheimer", results[0]["snippet"])
+        self.assertIn("Leo Szilard", results[0]["snippet"])
+
+    def test_model_failure_returns_grounded_oppenheimer_passage(self) -> None:
+        self.write_note(
+            "Raw/Sources/interview.md",
+            """# Interview
+
+Do you see parallels between yourself and Oppenheimer?
+The figure I most identified with was Leo Szilard, who first had the idea of a chain reaction.
+""",
+        )
+
+        result = brain_ask.BrainAskEngine(self.root, ollama=BadJsonOllama()).ask(
+            "Who did he identify with instead of Oppenheimer?"
+        )
+
+        self.assertIn("Leo Szilard", result["answer"])
+        self.assertEqual(result["sources"][0]["path"], "Raw/Sources/interview.md")
 
 
 if __name__ == "__main__":
