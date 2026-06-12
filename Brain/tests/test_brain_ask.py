@@ -169,6 +169,33 @@ The figure I most identified with was Leo Szilard, who first had the idea of a c
         self.assertIn("Leo Szilard", result["answer"])
         self.assertEqual(result["sources"][0]["path"], "Raw/Sources/interview.md")
 
+    def test_misspelled_specific_terms_retrieve_the_exact_passage(self) -> None:
+        self.write_note(
+            "Raw/Sources/interview.md",
+            """# Bloomberg Interview
+
+Do you see parallels between yourself and Oppenheimer?
+The figure I most identified with was Leo Szilard, who first had the idea of a chain reaction.
+""",
+        )
+        self.write_note(
+            "Raw/Sources/profile.md",
+            """# Dario Profile
+
+Dario appeared on Bloomberg and discussed several ideas about artificial intelligence.
+""",
+        )
+
+        results = brain_ask.search(
+            "What did Dario comapre himself to on Bloomberg when asked about Openhiemer?",
+            root=self.root,
+            limit=3,
+        )
+
+        self.assertEqual(results[0]["path"], "Raw/Sources/interview.md")
+        self.assertIn("Oppenheimer", results[0]["snippet"])
+        self.assertIn("Leo Szilard", results[0]["snippet"])
+
 
 if __name__ == "__main__":
     unittest.main()

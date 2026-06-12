@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import difflib
 import hashlib
 import json
 import os
@@ -350,11 +351,15 @@ class BrainAskEngine:
 
     def search(self, query: str, *, limit: int = 8, kind: str | None = None) -> list[dict]:
         self.ensure_index()
-        fts_query = fts_query_for(query)
-        if not fts_query:
-            return []
         with sqlite3.connect(self.config.index_path) as db:
             db.row_factory = sqlite3.Row
+            original_terms = query_terms(query)
+            terms = expanded_query_terms(db, original_terms)
+            corrected_terms = [term for term in terms if term not in original_terms]
+            fts_query = fts_query_for_terms(terms)
+            if not fts_query:
+                return []
+            candidate_limit = max(limit * 8, 50)
             if kind:
                 rows = db.execute(
                     """
@@ -364,7 +369,7 @@ class BrainAskEngine:
                     ORDER BY rank
                     LIMIT ?
                     """,
-                    (fts_query, kind, limit),
+                    (fts_query, kind, candidate_limit),
                 ).fetchall()
             else:
                 rows = db.execute(
@@ -375,11 +380,11 @@ class BrainAskEngine:
                     ORDER BY rank
                     LIMIT ?
                     """,
-                    (fts_query, limit),
+                    (fts_query, candidate_limit),
                 ).fetchall()
-        terms = query_terms(query)
-        results = [row_to_result(row, terms) for row in rows]
-        return sorted(results, key=lambda item: (-float(item["score"]), item["path"], item["chunk_index"]))
+        results = [row_to_result(row, terms, corrected_terms) for row in rows]
+        ranked = sorted(results, key=lambda item: (-float(item["score"]), item["path"], item["chunk_index"]))
+        return ranked[:limit]
 
     def ensure_index(self) -> None:
         self.config.index_path.parent.mkdir(parents=True, exist_ok=True)
@@ -571,6 +576,7 @@ def create_schema(db: sqlite3.Connection) -> None:
         )
         """
     )
+    db.execute("CREATE VIRTUAL TABLE IF NOT EXISTS chunks_vocab USING fts5vocab(chunks, 'row')")
     db.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
 
 
@@ -659,20 +665,49 @@ def query_terms(text: str) -> list[str]:
 
 
 def fts_query_for(text: str) -> str:
-    terms = query_terms(text)
+    return fts_query_for_terms(query_terms(text))
+
+
+def fts_query_for_terms(terms: list[str]) -> str:
     if not terms:
         return ""
     return " OR ".join(escape_fts_token(term) for term in terms[:12])
+
+
+def expanded_query_terms(db: sqlite3.Connection, terms: list[str]) -> list[str]:
+    if not terms:
+        return []
+    vocabulary = {str(row[0]) for row in db.execute("SELECT term FROM chunks_vocab")}
+    expanded: list[str] = []
+    for term in terms:
+        if term not in expanded:
+            expanded.append(term)
+        if term in vocabulary or len(term) < 8:
+            continue
+        candidates = [
+            candidate
+            for candidate in vocabulary
+            if candidate[:1] == term[:1] and abs(len(candidate) - len(term)) <= 2
+        ]
+        matches = difflib.get_close_matches(term, candidates, n=1, cutoff=0.72)
+        if matches and matches[0] not in expanded:
+            expanded.append(matches[0])
+    return expanded
 
 
 def escape_fts_token(token: str) -> str:
     return '"' + token.replace('"', '""') + '"'
 
 
-def row_to_result(row: sqlite3.Row, terms: list[str]) -> dict:
+def row_to_result(row: sqlite3.Row, terms: list[str], corrected_terms: list[str] | None = None) -> dict:
     text = str(row["text"] or "")
     rank = float(row["rank"] or 0)
-    lexical_score = term_specificity_score(text, str(row["title"] or ""), terms)
+    lexical_score = term_specificity_score(
+        text,
+        str(row["title"] or ""),
+        terms,
+        corrected_terms or [],
+    )
     return {
         "id": "",
         "path": row["path"],
@@ -708,14 +743,24 @@ def best_snippet(text: str, terms: list[str], max_chars: int = MAX_RESULT_SNIPPE
     return snippet
 
 
-def term_specificity_score(text: str, title: str, terms: list[str]) -> float:
+def term_specificity_score(
+    text: str,
+    title: str,
+    terms: list[str],
+    corrected_terms: list[str] | None = None,
+) -> float:
     haystack = f"{title}\n{text}".lower()
     matched = [term for term in terms if term.lower() in haystack]
     if not matched:
         return 0.0
     longest = max(len(term) for term in matched)
     coverage = len(matched) / max(len(terms), 1)
-    return float(longest) + coverage
+    correction_bonus = sum(
+        len(term) * 1.5
+        for term in (corrected_terms or [])
+        if term.lower() in haystack
+    )
+    return float(longest) + coverage + correction_bonus
 
 
 def deterministic_evidence_answer(candidates: list[dict]) -> str:
