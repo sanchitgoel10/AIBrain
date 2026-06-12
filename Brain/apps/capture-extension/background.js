@@ -1,6 +1,5 @@
 const BRIDGE_URL = "http://127.0.0.1:8765/capture";
 const STATUS_URL = "http://127.0.0.1:8765/status";
-const BRAIN_STATUS_URL = "http://127.0.0.1:8765/brain-status";
 const ASK_URL = "http://127.0.0.1:8765/ask";
 const OPEN_SOURCE_URL = "http://127.0.0.1:8765/open-source";
 const CANCEL_URL = "http://127.0.0.1:8765/cancel";
@@ -14,8 +13,7 @@ const STORAGE_KEY = "aiBrainUiState";
 let uiState = {
   tab: null,
   capture: { status: "idle", message: "Ready.", running: false },
-  ask: { status: "idle", query: "", answer: "", results: [], running: false },
-  brainStatus: null
+  ask: { status: "idle", query: "", answer: "", results: [], running: false }
 };
 let captureRunId = 0;
 let captureAbortController = null;
@@ -554,7 +552,6 @@ async function pollJob(jobId, runId, signal) {
     const job = payload.job || {};
     await updateCapture(job.status, job.message || "AI Brain capture is running.", { bridgeJobId: jobId });
     if (job.status === "done") {
-      await saveState({ brainStatus: job.brain_status || uiState.brainStatus });
       await updateCapture("done", `Saved ${job.path || "source note"} and linked ${job.ingest_path || "Wiki note"}.`, {
         path: job.path || "",
         ingestPath: job.ingest_path || ""
@@ -599,13 +596,6 @@ async function refreshContext() {
     updatedAt: new Date().toISOString()
   } : capture;
   await saveState({ tab: displayTabInfo, capture: captureState });
-  try {
-    const response = await fetch(BRAIN_STATUS_URL);
-    const payload = await response.json().catch(() => ({}));
-    if (response.ok && payload.ok) await saveState({ brainStatus: payload.brain_status });
-  } catch (_error) {
-    await saveState({ brainStatus: null });
-  }
   return uiState;
 }
 

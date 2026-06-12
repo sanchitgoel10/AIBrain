@@ -53,9 +53,8 @@ Expected:
 - Clicking `ATB` changes status while the capture is running.
 - Success shows a completed/green state.
 - Failure shows an error state with a readable message.
-- The Semantic compile card shows the deterministic number of Raw sources still pending durable compilation.
-- After a successful daily compile, the pending count reflects any sources not linked from durable Wiki notes.
-- No capture counter, threshold, or Reset control is shown.
+- The extension contains no semantic compile status, capture counter, threshold, or Reset control.
+- Semantic coverage is maintained by the daily automation and checked with `python3 scripts/wiki_tool.py semantic-pending`.
 
 ## C. YouTube Capture
 

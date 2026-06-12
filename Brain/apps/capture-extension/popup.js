@@ -11,8 +11,6 @@ const els = {
   askQuery: document.getElementById("askQuery"),
   askResults: document.getElementById("askResults"),
   askSubmit: document.getElementById("askSubmit"),
-  compileCard: document.getElementById("compileCard"),
-  compileStatus: document.getElementById("compileStatus"),
   capture: document.getElementById("capture"),
   kind: document.getElementById("kind"),
   progress: document.getElementById("progressBar"),
@@ -49,19 +47,6 @@ function setMode(mode) {
   els.tabAdd.classList.toggle("active", !ask);
   els.tabAsk.classList.toggle("active", ask);
   if (ask) els.askQuery.focus();
-}
-
-function updateBrainStatus(status) {
-  if (!status) {
-    els.compileStatus.textContent = "Bridge not available.";
-    return;
-  }
-  const pending = status.semantic_pending || 0;
-  const total = status.total_sources || 0;
-  els.compileCard.classList.toggle("due", pending > 0);
-  els.compileStatus.textContent = pending
-    ? `${pending} of ${total} sources pending daily compile.`
-    : `All ${total} sources semantically compiled.`;
 }
 
 function renderAskResults(results) {
@@ -124,7 +109,6 @@ function render(ui) {
   els.capture.classList.toggle("hidden", Boolean(capture.running));
   els.stopCapture.classList.toggle("hidden", !capture.running);
   setProgress(capture.status || "idle", capture.message || (tab.capturable === false ? "Open a YouTube video or article tab first." : "Ready."));
-  updateBrainStatus(state.ui.brainStatus || null);
   renderAsk(state.ui.ask || {});
 }
 

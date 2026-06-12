@@ -19,32 +19,11 @@ class CaptureBridgeTests(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self.addCleanup(self.tmp.cleanup)
         self.original_root = capture.ROOT
-        self.original_wiki_root = capture_bridge.wiki_tool.ROOT
-        self.original_wiki_raw = capture_bridge.wiki_tool.RAW
-        self.original_wiki_wiki = capture_bridge.wiki_tool.WIKI
         capture.ROOT = self.root
-        capture_bridge.wiki_tool.ROOT = self.root
-        capture_bridge.wiki_tool.RAW = self.root / "Raw" / "Sources"
-        capture_bridge.wiki_tool.WIKI = self.root / "Wiki"
-        for folder in ["Raw/Sources", "Wiki/Concepts", "Wiki/Topics", "Wiki/Entities", "Wiki/Projects", "Wiki/Logs"]:
-            (self.root / folder).mkdir(parents=True, exist_ok=True)
         self.addCleanup(self.restore_globals)
 
     def restore_globals(self) -> None:
         capture.ROOT = self.original_root
-        capture_bridge.wiki_tool.ROOT = self.original_wiki_root
-        capture_bridge.wiki_tool.RAW = self.original_wiki_raw
-        capture_bridge.wiki_tool.WIKI = self.original_wiki_wiki
-
-    def test_brain_status_reports_deterministic_semantic_coverage(self) -> None:
-        source = capture_bridge.wiki_tool.RAW / "source.md"
-        source.write_text("# Source\n", encoding="utf-8")
-
-        pending = capture_bridge.brain_status()
-
-        self.assertEqual(pending["total_sources"], 1)
-        self.assertEqual(pending["semantic_compiled"], 0)
-        self.assertEqual(pending["semantic_pending"], 1)
 
     def test_search_brain_returns_raw_and_wiki_matches(self) -> None:
         raw = self.root / "Raw" / "Sources"

@@ -196,32 +196,6 @@ button:disabled {
   background: #8992a3;
 }
 
-.compile-card {
-  margin-top: 12px;
-  padding: 10px;
-  border: 1px solid #e2e5ec;
-  border-radius: 8px;
-  background: white;
-}
-
-.compile-card.due {
-  border-color: #f59e0b;
-  background: #fffbeb;
-}
-
-.compile-label {
-  color: #20242d;
-  font-size: 12px;
-  font-weight: 740;
-}
-
-.compile-status {
-  margin-top: 2px;
-  color: #697386;
-  font-size: 11px;
-  line-height: 1.35;
-}
-
 .ask-panel.hidden {
   display: none;
 }

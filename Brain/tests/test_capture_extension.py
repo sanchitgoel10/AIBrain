@@ -22,6 +22,13 @@ class CaptureExtensionManifestTests(unittest.TestCase):
         self.assertIn('id="stopCapture"', popup)
         self.assertIn('"stop-capture"', background)
 
+    def test_popup_does_not_show_semantic_compile_status(self):
+        popup = (EXTENSION / "popup.html").read_text()
+        background = (EXTENSION / "background.js").read_text()
+
+        self.assertNotIn("Semantic compile", popup)
+        self.assertNotIn("brain-status", background)
+
 
 if __name__ == "__main__":
     unittest.main()

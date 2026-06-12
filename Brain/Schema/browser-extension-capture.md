@@ -63,7 +63,7 @@ If browser text extraction is too short, the extension scrolls the active tab an
 
 After capture, the bridge automatically creates a deterministic Wiki ingest log under `Wiki/Logs/`, adds an Obsidian backlink in the Raw note, rebuilds indexes, and updates the source manifest with covered sources accepted as processed.
 
-The extension shows the deterministic number of Raw sources still waiting for durable semantic compilation. The daily automation processes the complete pending queue regardless of how many sources were added.
+The extension handles capture and Ask only. Semantic compilation runs separately through the daily automation, which processes the complete pending queue regardless of how many sources were added.
 
 The `Ask` tab in the popup currently performs shallow local search over Raw and Wiki Markdown through the bridge. It does not call an LLM yet.
 

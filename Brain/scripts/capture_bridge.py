@@ -17,7 +17,6 @@ from pathlib import Path
 import capture_current_page as capture
 import auto_ingest
 import brain_ask
-import wiki_tool
 
 HOST = "127.0.0.1"
 PORT = 8765
@@ -106,16 +105,6 @@ def mark_job_timed_out(job: dict) -> None:
     job["error"] = "Capture timed out. Try again; the transcript provider may be slow or unavailable."
     job["message"] = job["error"]
     job["updated_at"] = time.time()
-
-
-def brain_status() -> dict:
-    rows = wiki_tool.semantic_coverage_rows()
-    pending = [row for row in rows if not row["semantic_compiled"]]
-    return {
-        "total_sources": len(rows),
-        "semantic_compiled": len(rows) - len(pending),
-        "semantic_pending": len(pending),
-    }
 
 
 def is_youtube_url(url: str) -> bool:
@@ -298,7 +287,6 @@ def run_capture_job(job_id: str, payload: dict) -> None:
         stop_if_cancelled(job_id)
         capture.run_ingest_command(path)
         stop_if_cancelled(job_id)
-        status = brain_status()
     except InterruptedError:
         return
     except (capture.CaptureError, subprocess.CalledProcessError, OSError, ValueError, json.JSONDecodeError) as exc:
@@ -313,7 +301,6 @@ def run_capture_job(job_id: str, payload: dict) -> None:
         path=path.relative_to(capture.ROOT).as_posix(),
         ingest_path=ingest_path.relative_to(capture.ROOT).as_posix(),
         url=url,
-        brain_status=status,
     )
 
 
@@ -344,10 +331,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path == "/health":
-            self.send_json(200, {"ok": True, "service": "aibrain-capture-bridge", "brain_status": brain_status()})
-            return
-        if parsed.path == "/brain-status":
-            self.send_json(200, {"ok": True, "brain_status": brain_status()})
+            self.send_json(200, {"ok": True, "service": "aibrain-capture-bridge"})
             return
         if parsed.path == "/ask":
             params = urllib.parse.parse_qs(parsed.query)
