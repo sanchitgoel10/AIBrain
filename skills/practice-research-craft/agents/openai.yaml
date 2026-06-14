@@ -1,0 +1,4 @@
+interface:
+  display_name: "Practice Research Craft"
+  short_description: "Train rigorous, original research habits"
+  default_prompt: "Use $practice-research-craft to turn my research goal into a rigorous practice and experiment loop."
