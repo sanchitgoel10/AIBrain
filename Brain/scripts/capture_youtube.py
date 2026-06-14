@@ -346,7 +346,12 @@ def minimal_youtube_data(url: str, reason: Exception | str) -> dict:
     }
 
 
-def capture_youtube(browser: str | None = None, data: dict | None = None, url: str | None = None) -> Path:
+def capture_youtube(
+    browser: str | None = None,
+    data: dict | None = None,
+    url: str | None = None,
+    replace_path: Path | None = None,
+) -> Path:
     if data is None:
         try:
             data = usetranscribe_youtube_data(url) if url else active_tab_json(browser or "", YOUTUBE_JS)
@@ -408,4 +413,5 @@ Capture warning: {data.get("captureWarning", "")}
         reference=url,
         content_types=["youtube", "transcript" if has_transcript else "metadata", "markdown"],
         body=body,
+        replace_path=replace_path,
     )

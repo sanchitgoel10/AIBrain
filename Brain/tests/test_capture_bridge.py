@@ -77,6 +77,73 @@ class CaptureBridgeTests(unittest.TestCase):
         self.assertEqual(job["message"], "new")
         self.assertEqual(job["job_id"], "new")
 
+    def test_canonical_source_identity_ignores_youtube_timestamps_and_tracking(self) -> None:
+        self.assertEqual(
+            capture_bridge.canonical_source_identity("https://www.youtube.com/watch?v=abc123&t=90s"),
+            capture_bridge.canonical_source_identity("https://youtu.be/abc123?si=share-token"),
+        )
+        self.assertEqual(
+            capture_bridge.canonical_source_identity("https://example.com/story/?utm_source=newsletter&id=7"),
+            capture_bridge.canonical_source_identity("https://www.example.com/story?id=7&utm_medium=email"),
+        )
+
+    def test_existing_source_reports_transcript_size_and_quality(self) -> None:
+        raw = self.root / "Raw" / "Sources"
+        raw.mkdir(parents=True, exist_ok=True)
+        transcript = "\n".join(
+            [
+                "- [00:00] First transcript line with enough useful context.",
+                "- [00:10] Second transcript line with more useful context.",
+                "- [00:20] Third transcript line with still more useful context.",
+                "- [00:30] Fourth transcript line that makes this clearly complete.",
+            ]
+        )
+        (raw / "video.md").write_text(
+            f"""---
+Title: "Useful Video"
+Reference: "https://www.youtube.com/watch?v=abc123&t=30s"
+---
+
+# Useful Video
+
+## Transcript
+
+{transcript}
+""",
+            encoding="utf-8",
+        )
+
+        source = capture_bridge.existing_source_for_url("https://youtu.be/abc123")
+
+        self.assertIsNotNone(source)
+        self.assertEqual(source["path"], "Raw/Sources/video.md")
+        self.assertEqual(source["quality"], "complete")
+        self.assertGreater(source["content_chars"], 200)
+        self.assertEqual(source["duplicate_count"], 1)
+
+    def test_existing_small_transcript_is_marked_suspect(self) -> None:
+        raw = self.root / "Raw" / "Sources"
+        raw.mkdir(parents=True, exist_ok=True)
+        (raw / "video.md").write_text(
+            """---
+Title: "Broken Video"
+Reference: "https://www.youtube.com/watch?v=broken123"
+---
+
+# Broken Video
+
+## Transcript
+
+Transcript could not be captured automatically.
+""",
+            encoding="utf-8",
+        )
+
+        source = capture_bridge.existing_source_for_url("https://www.youtube.com/watch?v=broken123")
+
+        self.assertEqual(source["quality"], "suspect")
+        self.assertIn("incomplete", source["quality_message"])
+
     def test_get_job_marks_stale_running_job_as_timed_out(self) -> None:
         capture_bridge.JOBS.clear()
         self.addCleanup(capture_bridge.JOBS.clear)

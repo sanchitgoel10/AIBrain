@@ -3,6 +3,7 @@ const STATUS_URL = "http://127.0.0.1:8765/status";
 const ASK_URL = "http://127.0.0.1:8765/ask";
 const OPEN_SOURCE_URL = "http://127.0.0.1:8765/open-source";
 const CANCEL_URL = "http://127.0.0.1:8765/cancel";
+const SOURCE_STATUS_URL = "http://127.0.0.1:8765/source-status";
 const ARTICLE_CAPTURE_TIMEOUT_MS = 120000;
 const ARTICLE_CAPTURE_MAX_BYTES = 64 * 1024 * 1024;
 const SCREENSHOT_PRIMARY_HOSTS = ["the-ken.com", "ft.com"];
@@ -88,6 +89,7 @@ function badgeFor(status) {
     capturing: ["ATB", "#7C3AED"],
     ingesting: ["ATB", "#0F766E"],
     maintenance: ["ATB", "#B45309"],
+    duplicate: ["ATB", "#B45309"],
     done: ["ATB", "#16833A"],
     error: ["ERR", "#B42318"]
   };
@@ -132,6 +134,28 @@ async function updateAsk(patch = {}) {
       updatedAt: new Date().toISOString()
     }
   });
+}
+
+function formatFileSize(bytes) {
+  const value = Number(bytes || 0);
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function duplicateMessage(source) {
+  const copies = Number(source?.duplicate_count || 1);
+  const copyText = copies > 1 ? ` ${copies} matching files were found; showing the strongest capture.` : "";
+  return `${source?.quality_message || "This source is already in the Brain."} ${source?.path || ""} is ${formatFileSize(source?.file_bytes)} with ${(source?.content_chars || 0).toLocaleString()} ${source?.content_label || "captured characters"}.${copyText}`;
+}
+
+async function existingSource(url, signal) {
+  const response = await fetch(`${SOURCE_STATUS_URL}?url=${encodeURIComponent(url)}`, { signal });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload.ok) {
+    throw new Error(payload.error || `Source check returned HTTP ${response.status}`);
+  }
+  return payload.exists ? payload.source : null;
 }
 
 function captureErrorMessage(error) {
@@ -599,7 +623,7 @@ async function refreshContext() {
   return uiState;
 }
 
-async function startCapture() {
+async function startCapture({ replace = false } = {}) {
   if (uiState.capture?.running) return;
   await refreshContext();
   const tab = await getActiveTab();
@@ -614,7 +638,22 @@ async function startCapture() {
   captureAbortController = abortController;
   let bridgeJobId = "";
   try {
-    await updateCapture("queued", "Preparing active tab.", { tabUrl: url, tabTitle: tab.title || "" });
+    await updateCapture("queued", replace ? "Preparing replacement capture." : "Checking whether this source is already in the Brain.", {
+      tabUrl: url,
+      tabTitle: tab.title || "",
+      duplicate: null
+    });
+    if (!replace) {
+      const duplicate = await existingSource(url, abortController.signal);
+      if (duplicate) {
+        await updateCapture("duplicate", duplicateMessage(duplicate), {
+          running: false,
+          duplicate,
+          bridgeJobId: ""
+        });
+        return;
+      }
+    }
     const page = await getArticlePayload(tab, runId);
     assertCaptureActive(runId);
     if (page) {
@@ -628,10 +667,18 @@ async function startCapture() {
     const response = await fetch(BRIDGE_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url, title: tab.title || "", page }),
+      body: JSON.stringify({ url, title: tab.title || "", page, replace }),
       signal: abortController.signal
     });
     const payload = await response.json().catch(() => ({}));
+    if (response.status === 409 && payload.code === "duplicate_source" && payload.source) {
+      await updateCapture("duplicate", duplicateMessage(payload.source), {
+        running: false,
+        duplicate: payload.source,
+        bridgeJobId: ""
+      });
+      return;
+    }
     if (!response.ok || !payload.ok) {
       throw new Error(payload.error || `Bridge returned HTTP ${response.status}`);
     }
@@ -661,6 +708,15 @@ async function stopCapture() {
     ingestPath: ""
   });
   await cancelBridgeJob(jobId);
+}
+
+async function dismissDuplicate() {
+  const path = uiState.capture?.duplicate?.path || "Existing source";
+  await updateCapture("idle", `${path} kept unchanged.`, {
+    running: false,
+    duplicate: null,
+    bridgeJobId: ""
+  });
 }
 
 async function askBrain(query) {
@@ -750,6 +806,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
     if (message?.type === "stop-capture") {
       await stopCapture();
+      sendResponse({ ok: true, state: uiState });
+      return;
+    }
+    if (message?.type === "replace-capture") {
+      startCapture({ replace: true });
+      sendResponse({ ok: true, state: uiState });
+      return;
+    }
+    if (message?.type === "dismiss-duplicate") {
+      await dismissDuplicate();
       sendResponse({ ok: true, state: uiState });
       return;
     }

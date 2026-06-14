@@ -42,6 +42,10 @@ In Dia or another Chromium browser:
 3. The extension sends the exact active tab URL to the local bridge.
 4. The bridge saves the note in `Raw/Sources/`.
 
+Before capturing, the bridge checks `Raw/Sources/` for the same canonical source. YouTube timestamps and share URLs resolve to the same video ID, and common article tracking parameters are ignored. If a match exists, the extension shows the existing file size, captured-content size, and whether the capture looks complete. It does not capture again unless the user explicitly chooses `Replace existing`.
+
+Replacement reuses the existing Raw note path. A failed transcript, screenshot, or OCR attempt does not overwrite the existing note because the new content is validated before it is written.
+
 The extension popup and badge show progress:
 
 ```text
@@ -49,6 +53,7 @@ ATB blue    queued
 ATB purple  capturing transcript or article text
 ATB teal    creating the linked Wiki ingest note
 ATB amber   updating the AI Brain catalog
+ATB amber   duplicate source awaiting Keep or Replace
 ATB green   complete
 ERR red     failed
 ```

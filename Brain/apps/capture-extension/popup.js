@@ -12,8 +12,11 @@ const els = {
   askResults: document.getElementById("askResults"),
   askSubmit: document.getElementById("askSubmit"),
   capture: document.getElementById("capture"),
+  duplicateActions: document.getElementById("duplicateActions"),
+  keepExisting: document.getElementById("keepExisting"),
   kind: document.getElementById("kind"),
   progress: document.getElementById("progressBar"),
+  replaceExisting: document.getElementById("replaceExisting"),
   status: document.getElementById("status"),
   stopCapture: document.getElementById("stopCapture"),
   tabAdd: document.getElementById("tabAdd"),
@@ -106,8 +109,10 @@ function render(ui) {
   els.url.textContent = tab.url || "";
   els.kind.textContent = tab.kind || "Reading active tab";
   els.capture.disabled = tab.capturable === false;
-  els.capture.classList.toggle("hidden", Boolean(capture.running));
+  const duplicate = capture.status === "duplicate" && Boolean(capture.duplicate);
+  els.capture.classList.toggle("hidden", Boolean(capture.running) || duplicate);
   els.stopCapture.classList.toggle("hidden", !capture.running);
+  els.duplicateActions.classList.toggle("hidden", !duplicate);
   setProgress(capture.status || "idle", capture.message || (tab.capturable === false ? "Open a YouTube video or article tab first." : "Ready."));
   renderAsk(state.ui.ask || {});
 }
@@ -135,6 +140,22 @@ async function stopCapture() {
   }
 }
 
+async function replaceExisting() {
+  els.replaceExisting.disabled = true;
+  setProgress("queued", "Preparing replacement capture.");
+  try {
+    const response = await sendMessage({ type: "replace-capture" });
+    if (response?.ok && response.state) render(response.state);
+  } finally {
+    els.replaceExisting.disabled = false;
+  }
+}
+
+async function keepExisting() {
+  const response = await sendMessage({ type: "dismiss-duplicate" });
+  if (response?.ok && response.state) render(response.state);
+}
+
 async function askBrain(event) {
   event.preventDefault();
   const query = els.askQuery.value.trim();
@@ -160,6 +181,8 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 
 els.capture.addEventListener("click", startCapture);
 els.stopCapture.addEventListener("click", stopCapture);
+els.replaceExisting.addEventListener("click", replaceExisting);
+els.keepExisting.addEventListener("click", keepExisting);
 els.tabAdd.addEventListener("click", () => setMode("add"));
 els.tabAsk.addEventListener("click", () => setMode("ask"));
 els.askForm.addEventListener("submit", askBrain);

@@ -104,7 +104,12 @@ def minimal_article_data(url: str, reason: Exception | str) -> dict:
     }
 
 
-def capture_article(browser: str | None = None, data: dict | None = None, url: str | None = None) -> Path:
+def capture_article(
+    browser: str | None = None,
+    data: dict | None = None,
+    url: str | None = None,
+    replace_path: Path | None = None,
+) -> Path:
     if data is None:
         try:
             data = article_data_from_url(url) if url else active_tab_json(browser or "", ARTICLE_JS)
@@ -148,4 +153,5 @@ Capture warning: {data.get("captureWarning", "")}
         reference=data.get("url", ""),
         content_types=content_types,
         body=body,
+        replace_path=replace_path,
     )

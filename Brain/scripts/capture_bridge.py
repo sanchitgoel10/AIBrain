@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 import subprocess
 import tempfile
 import threading
@@ -25,6 +26,13 @@ RUNNING_JOB_TIMEOUT_SECONDS = 4 * 60
 JOBS: dict[str, dict] = {}
 JOBS_LOCK = threading.Lock()
 INGEST_LOCK = threading.Lock()
+TRACKING_QUERY_KEYS = {
+    "fbclid",
+    "gclid",
+    "mc_cid",
+    "mc_eid",
+    "ref_src",
+}
 
 
 def set_job(job_id: str, **updates: object) -> None:
@@ -109,6 +117,105 @@ def mark_job_timed_out(job: dict) -> None:
 
 def is_youtube_url(url: str) -> bool:
     return "youtube.com/watch" in url or "youtu.be/" in url
+
+
+def canonical_source_identity(url: str) -> str:
+    url = url.strip()
+    video_id = capture.extract_youtube_id(url)
+    if video_id and is_youtube_url(url):
+        return f"youtube:{video_id}"
+    parsed = urllib.parse.urlsplit(url)
+    host = parsed.netloc.lower().removeprefix("www.")
+    path = parsed.path or "/"
+    if path != "/":
+        path = path.rstrip("/")
+    query = [
+        (key, value)
+        for key, value in urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+        if not key.lower().startswith("utm_") and key.lower() not in TRACKING_QUERY_KEYS
+    ]
+    normalized_query = urllib.parse.urlencode(sorted(query))
+    return urllib.parse.urlunsplit((parsed.scheme.lower() or "https", host, path, normalized_query, ""))
+
+
+def captured_section(body: str, heading: str) -> str:
+    match = re.search(
+        rf"(?ims)^##\s+{re.escape(heading)}\s*$\n(.*?)(?=^##\s+|\Z)",
+        body,
+    )
+    return match.group(1).strip() if match else ""
+
+
+def inspect_source_note(path: Path, requested_url: str) -> dict:
+    frontmatter, body = auto_ingest.wiki_tool.read_frontmatter(path)
+    reference = str(frontmatter.get("Reference", "")).strip()
+    youtube = is_youtube_url(reference or requested_url)
+    heading = "Transcript" if youtube else "Article Text"
+    captured_text = captured_section(body, heading)
+    content_chars = len(captured_text)
+    failure_text = captured_text.lower()
+    has_failure_marker = any(
+        marker in failure_text
+        for marker in (
+            "could not be captured",
+            "could not read enough",
+            "saved for follow-up",
+            "transcript was not captured",
+        )
+    )
+    if youtube:
+        timestamp_lines = len(re.findall(r"(?m)^-\s+\[[0-9:]+\]", captured_text))
+        complete = content_chars >= 200 and timestamp_lines >= 2 and not has_failure_marker
+        detail_label = "transcript characters"
+    else:
+        complete = content_chars >= 300 and not has_failure_marker
+        detail_label = "article characters"
+    return {
+        "_path": path,
+        "path": path.relative_to(capture.ROOT).as_posix(),
+        "title": str(frontmatter.get("Title", "")).strip() or path.stem,
+        "reference": reference,
+        "file_bytes": path.stat().st_size,
+        "content_chars": content_chars,
+        "content_label": detail_label,
+        "quality": "complete" if complete else "suspect",
+        "quality_message": "Existing capture looks complete." if complete else "Existing capture may be incomplete.",
+    }
+
+
+def existing_source_for_url(url: str) -> dict | None:
+    identity = canonical_source_identity(url)
+    raw = capture.ROOT / "Raw" / "Sources"
+    if not identity or not raw.exists():
+        return None
+    matches: list[dict] = []
+    for path in raw.glob("*.md"):
+        try:
+            frontmatter, _body = auto_ingest.wiki_tool.read_frontmatter(path)
+            reference = str(frontmatter.get("Reference", "")).strip()
+            if reference and canonical_source_identity(reference) == identity:
+                matches.append(inspect_source_note(path, url))
+        except (OSError, ValueError):
+            continue
+    if not matches:
+        return None
+    matches.sort(
+        key=lambda item: (
+            item["quality"] == "complete",
+            int(item["content_chars"]),
+            int(item["file_bytes"]),
+        ),
+        reverse=True,
+    )
+    result = matches[0]
+    result["duplicate_count"] = len(matches)
+    return result
+
+
+def public_source_status(source: dict | None) -> dict | None:
+    if not source:
+        return None
+    return {key: value for key, value in source.items() if not key.startswith("_")}
 
 
 def search_brain(query: str, *, limit: int = 8) -> list[dict]:
@@ -242,10 +349,14 @@ def run_capture_job(job_id: str, payload: dict) -> None:
             raise capture.CaptureError("The extension did not send a URL.")
         if not capture.is_capture_url(url):
             raise capture.CaptureError(f"Not a captureable URL: {url}")
+        existing = existing_source_for_url(url)
+        replace_path = existing["_path"] if existing and payload.get("_replace_existing") else None
+        if existing and not replace_path:
+            raise capture.CaptureError("This source already exists in the Brain.")
 
         if is_youtube_url(url):
             set_job(job_id, status="capturing", message="Capturing YouTube transcript. Uncached videos can take a few minutes.")
-            path = capture.capture_youtube(url=url)
+            path = capture.capture_youtube(url=url, replace_path=replace_path)
         elif isinstance(payload.get("page"), dict):
             screenshots = payload["page"].get("screenshots")
             if screenshots:
@@ -253,10 +364,10 @@ def run_capture_job(job_id: str, payload: dict) -> None:
             else:
                 set_job(job_id, status="capturing", message="Saving visible article text from the browser tab.")
             article_payload = article_payload_with_ocr(payload)
-            path = capture.capture_article(data=article_data_from_payload(article_payload))
+            path = capture.capture_article(data=article_data_from_payload(article_payload), replace_path=replace_path)
         else:
             set_job(job_id, status="capturing", message="Fetching article page text.")
-            path = capture.capture_article(url=url)
+            path = capture.capture_article(url=url, replace_path=replace_path)
 
         stop_if_cancelled(job_id)
         with INGEST_LOCK:
@@ -372,6 +483,15 @@ class BridgeHandler(BaseHTTPRequestHandler):
             job_id, job = match
             self.send_json(200, {"ok": True, "job_id": job_id, "job": job})
             return
+        if parsed.path == "/source-status":
+            params = urllib.parse.parse_qs(parsed.query)
+            url = params.get("url", [""])[0]
+            if not url:
+                self.send_json(400, {"ok": False, "error": "url is required"})
+                return
+            source = existing_source_for_url(url)
+            self.send_json(200, {"ok": True, "exists": bool(source), "source": public_source_status(source)})
+            return
         self.send_json(404, {"ok": False, "error": "not found"})
 
     def do_POST(self) -> None:
@@ -402,6 +522,20 @@ class BridgeHandler(BaseHTTPRequestHandler):
             if not url:
                 raise capture.CaptureError("The extension did not send a URL.")
             title = str(payload.get("title", "")).strip()
+            replace_existing = bool(payload.get("replace"))
+            existing = existing_source_for_url(url)
+            if existing and not replace_existing:
+                self.send_json(
+                    409,
+                    {
+                        "ok": False,
+                        "code": "duplicate_source",
+                        "error": "This source already exists in the Brain.",
+                        "source": public_source_status(existing),
+                    },
+                )
+                return
+            payload["_replace_existing"] = bool(existing and replace_existing)
         except (capture.CaptureError, subprocess.CalledProcessError, OSError, json.JSONDecodeError) as exc:
             self.send_json(400, {"ok": False, "error": str(exc)})
             return

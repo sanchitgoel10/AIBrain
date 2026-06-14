@@ -72,7 +72,22 @@ Expected:
 - `Wiki/Topics/captured-sources.md` links to the ingest note and source.
 - In Obsidian graph, the new yellow Raw node is connected to at least the ingest note and capture hub.
 
-## D. Article Capture
+## D. Duplicate And Replacement
+
+1. Open a YouTube video or article that has already been captured.
+2. Click `ATB`.
+
+Expected:
+
+- No transcript request, scrolling, screenshot capture, OCR, or new note begins.
+- The popup reports the existing source path, file size, and transcript/article character count.
+- The popup labels obviously small or failed captures as potentially incomplete.
+- `Keep existing` leaves the source unchanged.
+- `Replace existing` captures fresh content and overwrites the same Raw source path.
+- A failed replacement capture leaves the existing source content unchanged.
+- YouTube timestamp/share URL variants and article URLs with common tracking parameters are treated as the same source.
+
+## E. Article Capture
 
 1. Open a readable article page.
 2. Click `ATB`.
@@ -91,7 +106,7 @@ For paywalled or rendered articles:
 - If DOM extraction is too short, the extension should capture screenshots.
 - The bridge should run local OCR and save extracted text, or return a clear error.
 
-## E. EPUB Book Import
+## F. EPUB Book Import
 
 Put a book in:
 
@@ -114,7 +129,7 @@ Expected:
 - A linked ingest note appears under `Wiki/Logs/`.
 - The book source is connected in Obsidian graph through the ingest note and capture hub.
 
-## F. Catalog And Manifest
+## G. Catalog And Manifest
 
 After any successful source capture or EPUB import, run:
 
@@ -131,7 +146,7 @@ Expected:
 - `Schema/source-manifest.jsonl` lists the Raw source.
 - Processed sources have at least one `covered_by` Wiki note.
 
-## G. Git Privacy
+## H. Git Privacy
 
 Run:
 
@@ -157,7 +172,7 @@ Expected:
 
 - `public audit passed`
 
-## H. Ask My Brain
+## I. Ask My Brain
 
 1. Open the extension popup.
 2. Switch to `Ask`.

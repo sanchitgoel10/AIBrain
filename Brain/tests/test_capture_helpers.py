@@ -72,6 +72,28 @@ class CaptureHelperTests(unittest.TestCase):
             self.assertIn("Processed: false", text)
             self.assertIn("# My Source", text)
 
+    def test_write_source_note_can_replace_the_existing_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            original_raw = capture_common.RAW
+            capture_common.RAW = Path(tmp) / "Raw" / "Sources"
+            self.addCleanup(setattr, capture_common, "RAW", original_raw)
+            capture_common.RAW.mkdir(parents=True)
+            existing = capture_common.RAW / "original-name.md"
+            existing.write_text("old incomplete capture", encoding="utf-8")
+
+            path = capture_common.write_source_note(
+                title="A Better Title",
+                author="Author",
+                reference="https://example.com/source",
+                content_types=["article", "markdown"],
+                body="# A Better Title\n\nComplete replacement body.",
+                replace_path=existing,
+            )
+
+            self.assertEqual(path, existing.resolve())
+            self.assertIn("Complete replacement body.", path.read_text(encoding="utf-8"))
+            self.assertEqual(list(capture_common.RAW.glob("*.md")), [existing])
+
 
 if __name__ == "__main__":
     unittest.main()

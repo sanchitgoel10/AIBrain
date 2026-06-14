@@ -146,6 +146,11 @@ p {
   background: #b45309;
 }
 
+.progress-bar.duplicate {
+  width: 100%;
+  background: #b45309;
+}
+
 .progress-bar.done {
   width: 100%;
   background: #16833a;
@@ -187,8 +192,28 @@ button {
   display: grid;
 }
 
+.duplicate-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.duplicate-actions.hidden {
+  display: none;
+}
+
 .stop-action {
   background: #b42318;
+}
+
+.secondary-action {
+  border: 1px solid #d8dde8;
+  background: white;
+  color: #20242d;
+}
+
+.replace-action {
+  background: #b45309;
 }
 
 button:disabled {

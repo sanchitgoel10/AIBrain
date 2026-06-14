@@ -102,11 +102,14 @@ def write_source_note(
     content_types: list[str],
     body: str,
     processed: bool = False,
+    replace_path: Path | None = None,
 ) -> Path:
     RAW.mkdir(parents=True, exist_ok=True)
     base = slugify(title)
-    path = RAW / f"{base}.md"
-    if path.exists():
+    path = replace_path.resolve() if replace_path else RAW / f"{base}.md"
+    if replace_path and (path.parent != RAW.resolve() or path.suffix.lower() != ".md"):
+        raise CaptureError("Replacement source must be a Markdown file under Raw/Sources.")
+    if not replace_path and path.exists():
         suffix = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
         path = RAW / f"{base}-{suffix}.md"
     frontmatter = [
