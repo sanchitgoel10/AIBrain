@@ -82,6 +82,8 @@ YouTube capture keeps UseTranscribe as the primary transcript provider. Before
 the bridge starts the job, the extension also prepares an existing-caption
 candidate with the MIT-licensed Defuddle YouTube extractor. The bridge consumes
 that candidate only when UseTranscribe fails or returns an empty transcript.
+For videos longer than 90 minutes, the bridge uses a valid Defuddle caption
+candidate immediately instead of sending the long video to UseTranscribe.
 
 Defuddle output is normalized to the same timestamped Markdown format used by
 UseTranscribe:

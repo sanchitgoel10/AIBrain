@@ -107,6 +107,45 @@ class CaptureHelperTests(unittest.TestCase):
         self.assertEqual(data["title"], "Recovered Video")
         self.assertEqual(data["transcribeSource"], "defuddle-youtube-captions")
 
+    def test_video_over_90_minutes_uses_defuddle_before_usetranscribe(self) -> None:
+        fallback = {
+            "title": "Long Video",
+            "duration": 5401,
+            "transcript": "**0:00** · Long video caption.",
+        }
+
+        with patch.object(capture_youtube, "usetranscribe_youtube_data") as primary:
+            data = capture_youtube.youtube_data_with_fallback(
+                "https://www.youtube.com/watch?v=long123",
+                fallback,
+            )
+
+        primary.assert_not_called()
+        self.assertEqual(data["transcribeSource"], "defuddle-youtube-captions")
+        self.assertIn("longer than 90 minutes", data["captureWarning"])
+
+    def test_video_exactly_90_minutes_keeps_usetranscribe_primary(self) -> None:
+        primary = {
+            "title": "Ninety Minute Video",
+            "transcript": "- [00:00] Primary transcript.",
+            "transcribeSource": "usetranscribe",
+        }
+        with patch.object(
+            capture_youtube,
+            "usetranscribe_youtube_data",
+            return_value=primary,
+        ) as provider:
+            data = capture_youtube.youtube_data_with_fallback(
+                "https://www.youtube.com/watch?v=ninety123",
+                {
+                    "duration": 5400,
+                    "transcript": "**0:00** · Defuddle transcript.",
+                },
+            )
+
+        provider.assert_called_once()
+        self.assertIs(data, primary)
+
     def test_article_html_extraction_removes_page_chrome(self) -> None:
         html = """
         <html>

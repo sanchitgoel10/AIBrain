@@ -24,6 +24,7 @@ from capture_common import (
 USETRANSCRIBE_BASE_URL = "https://www.usetranscribe.io"
 USETRANSCRIBE_REQUEST_TIMEOUT_SECONDS = int(os.environ.get("USETRANSCRIBE_REQUEST_TIMEOUT_SECONDS", "30"))
 USETRANSCRIBE_STREAM_TIMEOUT_SECONDS = int(os.environ.get("USETRANSCRIBE_STREAM_TIMEOUT_SECONDS", "180"))
+LONG_VIDEO_SECONDS = 90 * 60
 
 YOUTUBE_JS = r"""
 (() => {
@@ -335,6 +336,17 @@ def usetranscribe_youtube_data(url: str) -> dict:
 
 
 def youtube_data_with_fallback(url: str, defuddle_fallback: dict | None = None) -> dict:
+    fallback_duration = float((defuddle_fallback or {}).get("duration") or 0)
+    if defuddle_fallback and fallback_duration > LONG_VIDEO_SECONDS:
+        try:
+            data = normalize_defuddle_fallback(defuddle_fallback, url)
+            data["captureWarning"] = (
+                "Used Defuddle YouTube captions because this video is longer than 90 minutes."
+            )
+            return data
+        except CaptureError:
+            pass
+
     try:
         primary = usetranscribe_youtube_data(url)
         if str(primary.get("transcript") or "").strip():
