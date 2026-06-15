@@ -29,6 +29,19 @@ class CaptureExtensionManifestTests(unittest.TestCase):
         self.assertNotIn("Semantic compile", popup)
         self.assertNotIn("brain-status", background)
 
+    def test_youtube_capture_supplies_defuddle_fallback_without_touching_articles(self):
+        manifest = json.loads((EXTENSION / "manifest.json").read_text())
+        background = (EXTENSION / "background.js").read_text()
+        content_scripts = manifest.get("content_scripts", [])
+
+        self.assertTrue((EXTENSION / "vendor" / "defuddle.js").exists())
+        self.assertEqual(len(content_scripts), 1)
+        self.assertTrue(all("youtube.com" in pattern for pattern in content_scripts[0]["matches"]))
+        self.assertIn("vendor/defuddle.js", content_scripts[0]["js"])
+        self.assertIn("getYoutubeDefuddlePayload", background)
+        self.assertIn("youtubeFallback", background)
+        self.assertIn("if (!isYoutubeUrl", background)
+
 
 if __name__ == "__main__":
     unittest.main()

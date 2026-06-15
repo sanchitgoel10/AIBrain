@@ -75,3 +75,21 @@ The `Ask` tab in the popup currently performs shallow local search over Raw and 
 ## Why This Replaces The Floater
 
 Dia does not expose the current tab through Chrome's AppleScript API. Reading Dia history or session files can surface stale tabs, so it is not reliable enough for one-click capture. The extension path is the primary path because the browser itself supplies the active tab URL.
+
+# YouTube transcript fallback
+
+YouTube capture keeps UseTranscribe as the primary transcript provider. Before
+the bridge starts the job, the extension also prepares an existing-caption
+candidate with the MIT-licensed Defuddle YouTube extractor. The bridge consumes
+that candidate only when UseTranscribe fails or returns an empty transcript.
+
+Defuddle output is normalized to the same timestamped Markdown format used by
+UseTranscribe:
+
+```markdown
+- [00:00] First caption sentence.
+- [01:02] Second caption sentence.
+```
+
+This fallback is loaded only on YouTube pages. Article DOM and screenshot/OCR
+capture paths are unchanged.

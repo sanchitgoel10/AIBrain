@@ -356,7 +356,11 @@ def run_capture_job(job_id: str, payload: dict) -> None:
 
         if is_youtube_url(url):
             set_job(job_id, status="capturing", message="Capturing YouTube transcript. Uncached videos can take a few minutes.")
-            path = capture.capture_youtube(url=url, replace_path=replace_path)
+            path = capture.capture_youtube(
+                url=url,
+                replace_path=replace_path,
+                defuddle_fallback=payload.get("youtube_fallback"),
+            )
         elif isinstance(payload.get("page"), dict):
             screenshots = payload["page"].get("screenshots")
             if screenshots:

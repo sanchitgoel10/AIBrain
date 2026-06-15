@@ -564,6 +564,35 @@ async function getArticlePayload(tab, runId) {
   return page;
 }
 
+async function getYoutubeDefuddlePayload(tab, runId) {
+  if (!isYoutubeUrl(tab?.url || "")) return null;
+  assertCaptureActive(runId);
+  await updateCapture("capturing", "Preparing YouTube caption fallback.");
+
+  async function requestTranscript() {
+    return chrome.tabs.sendMessage(tab.id, { type: "extract-youtube-defuddle" });
+  }
+
+  try {
+    let response;
+    try {
+      response = await requestTranscript();
+    } catch (_error) {
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        files: ["vendor/defuddle.js", "youtube-defuddle.js"]
+      });
+      response = await requestTranscript();
+    }
+    assertCaptureActive(runId);
+    if (!response?.ok || !String(response.data?.transcript || "").trim()) return null;
+    return response.data;
+  } catch (_error) {
+    // UseTranscribe and the bridge's direct-caption path remain available.
+    return null;
+  }
+}
+
 async function pollJob(jobId, runId, signal) {
   for (let attempt = 0; attempt < 360; attempt += 1) {
     await sleep(1500);
@@ -654,6 +683,7 @@ async function startCapture({ replace = false } = {}) {
         return;
       }
     }
+    const youtubeFallback = await getYoutubeDefuddlePayload(tab, runId);
     const page = await getArticlePayload(tab, runId);
     assertCaptureActive(runId);
     if (page) {
@@ -667,7 +697,13 @@ async function startCapture({ replace = false } = {}) {
     const response = await fetch(BRIDGE_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url, title: tab.title || "", page, replace }),
+      body: JSON.stringify({
+        url,
+        title: tab.title || "",
+        page,
+        youtube_fallback: youtubeFallback,
+        replace
+      }),
       signal: abortController.signal
     });
     const payload = await response.json().catch(() => ({}));

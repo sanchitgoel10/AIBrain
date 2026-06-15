@@ -179,6 +179,46 @@ def transcript_from_segments(segments: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def normalize_defuddle_transcript(transcript: str) -> str:
+    lines = []
+    pattern = re.compile(
+        r"^\*\*(?P<timestamp>\d{1,2}:\d{2}(?::\d{2})?)\*\*\s*[·\-–—]\s*(?P<text>.+)$"
+    )
+    for raw_line in str(transcript or "").splitlines():
+        match = pattern.match(raw_line.strip())
+        if not match:
+            continue
+        parts = [int(part) for part in match.group("timestamp").split(":")]
+        seconds = parts[-1] + (parts[-2] * 60)
+        if len(parts) == 3:
+            seconds += parts[0] * 3600
+        text = re.sub(r"\s+", " ", match.group("text")).strip()
+        if text:
+            lines.append(f"- [{format_seconds(str(seconds))}] {text}")
+    return "\n".join(lines)
+
+
+def normalize_defuddle_fallback(data: dict, original_url: str) -> dict:
+    transcript = normalize_defuddle_transcript(str(data.get("transcript") or ""))
+    if not transcript:
+        raise CaptureError("Defuddle did not find a usable YouTube caption transcript.")
+    return {
+        "kind": "youtube",
+        "url": original_url,
+        "title": data.get("title") or "YouTube Video",
+        "author": data.get("author") or "",
+        "videoId": extract_youtube_id(original_url),
+        "currentTime": float(data.get("currentTime") or youtube_time_from_url(original_url)),
+        "duration": float(data.get("duration") or 0),
+        "transcript": transcript,
+        "summary": "",
+        "language": data.get("language") or "",
+        "transcribePermalink": "",
+        "transcribeSource": "defuddle-youtube-captions",
+        "captionTracks": [],
+    }
+
+
 def normalize_usetranscribe_cached(data: dict, original_url: str) -> dict:
     transcript = data.get("transcript") or {}
     segments = transcript.get("segments") or []
@@ -294,6 +334,34 @@ def usetranscribe_youtube_data(url: str) -> dict:
     return normalize_usetranscribe_done(fetch_usetranscribe_sse(url), url)
 
 
+def youtube_data_with_fallback(url: str, defuddle_fallback: dict | None = None) -> dict:
+    try:
+        primary = usetranscribe_youtube_data(url)
+        if str(primary.get("transcript") or "").strip():
+            return primary
+        raise CaptureError("Transcribe API returned no usable transcript.")
+    except (CaptureError, urllib.error.URLError, ET.ParseError, json.JSONDecodeError) as primary_error:
+        if defuddle_fallback:
+            try:
+                data = normalize_defuddle_fallback(defuddle_fallback, url)
+                data["captureWarning"] = (
+                    "Primary Transcribe API failed; used Defuddle YouTube captions fallback. "
+                    f"Reason: {primary_error}"
+                )
+                return data
+            except CaptureError:
+                pass
+        try:
+            data = youtube_data_from_url(url)
+            data["captureWarning"] = (
+                "Primary Transcribe API and Defuddle fallback failed; used direct YouTube captions fallback. "
+                f"Reason: {primary_error}"
+            )
+            return data
+        except (CaptureError, urllib.error.URLError, ET.ParseError, json.JSONDecodeError):
+            return minimal_youtube_data(url, primary_error)
+
+
 def transcript_or_warning(caption_tracks: list[dict]) -> tuple[str, bool]:
     try:
         return fetch_transcript(caption_tracks), True
@@ -351,18 +419,14 @@ def capture_youtube(
     data: dict | None = None,
     url: str | None = None,
     replace_path: Path | None = None,
+    defuddle_fallback: dict | None = None,
 ) -> Path:
     if data is None:
-        try:
-            data = usetranscribe_youtube_data(url) if url else active_tab_json(browser or "", YOUTUBE_JS)
-        except (CaptureError, urllib.error.URLError, ET.ParseError, json.JSONDecodeError) as exc:
-            if not url:
-                raise
-            try:
-                data = youtube_data_from_url(url)
-                data["captureWarning"] = f"Primary Transcribe API failed; used YouTube captions fallback. Reason: {exc}"
-            except (CaptureError, urllib.error.URLError, ET.ParseError, json.JSONDecodeError):
-                data = minimal_youtube_data(url, exc)
+        data = (
+            youtube_data_with_fallback(url, defuddle_fallback)
+            if url
+            else active_tab_json(browser or "", YOUTUBE_JS)
+        )
     if data.get("transcript"):
         transcript, has_transcript = data["transcript"], True
     else:
