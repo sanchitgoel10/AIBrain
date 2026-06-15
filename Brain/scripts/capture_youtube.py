@@ -352,7 +352,13 @@ def youtube_data_with_fallback(url: str, defuddle_fallback: dict | None = None) 
         if str(primary.get("transcript") or "").strip():
             return primary
         raise CaptureError("Transcribe API returned no usable transcript.")
-    except (CaptureError, urllib.error.URLError, ET.ParseError, json.JSONDecodeError) as primary_error:
+    except (
+        CaptureError,
+        TimeoutError,
+        urllib.error.URLError,
+        ET.ParseError,
+        json.JSONDecodeError,
+    ) as primary_error:
         if defuddle_fallback:
             try:
                 data = normalize_defuddle_fallback(defuddle_fallback, url)

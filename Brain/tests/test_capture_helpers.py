@@ -75,6 +75,23 @@ class CaptureHelperTests(unittest.TestCase):
         self.assertEqual(data["transcribeSource"], "defuddle-youtube-captions")
         self.assertIn("Primary Transcribe API failed", data["captureWarning"])
 
+    def test_provider_read_timeout_still_uses_defuddle_fallback(self) -> None:
+        with patch.object(
+            capture_youtube,
+            "usetranscribe_youtube_data",
+            side_effect=TimeoutError("The read operation timed out"),
+        ):
+            data = capture_youtube.youtube_data_with_fallback(
+                "https://www.youtube.com/watch?v=abc123",
+                {
+                    "title": "Recovered After Timeout",
+                    "transcript": "**0:00** · Recovered caption.",
+                },
+            )
+
+        self.assertEqual(data["transcribeSource"], "defuddle-youtube-captions")
+        self.assertIn("read operation timed out", data["captureWarning"])
+
     def test_youtube_capture_keeps_usetranscribe_as_primary(self) -> None:
         primary = {
             "title": "Primary Video",
