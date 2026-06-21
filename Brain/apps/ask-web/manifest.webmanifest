@@ -1,0 +1,8 @@
+{
+  "name": "Ask My Brain",
+  "short_name": "Ask Brain",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f5f7fb",
+  "theme_color": "#f5f7fb"
+}

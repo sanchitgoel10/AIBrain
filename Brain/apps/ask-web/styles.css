@@ -1,0 +1,203 @@
+:root {
+  color-scheme: light;
+  font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #f5f7fb;
+  color: #151820;
+  letter-spacing: 0;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: #f5f7fb;
+}
+
+button,
+textarea {
+  font: inherit;
+  letter-spacing: 0;
+}
+
+.shell {
+  width: min(760px, 100%);
+  margin: 0 auto;
+  padding: max(28px, env(safe-area-inset-top)) 20px max(40px, env(safe-area-inset-bottom));
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding-bottom: 28px;
+}
+
+.mark {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  flex: 0 0 48px;
+  border-radius: 8px;
+  background: #155eef;
+  color: #ffffff;
+  font-size: 22px;
+  font-weight: 800;
+}
+
+h1 {
+  margin: 0;
+  font-size: 24px;
+  line-height: 1.15;
+}
+
+.connection {
+  margin: 5px 0 0;
+  color: #667085;
+  font-size: 14px;
+}
+
+.connection[data-state="connected"] {
+  color: #16833a;
+}
+
+.connection[data-state="offline"] {
+  color: #b42318;
+}
+
+.ask-form {
+  display: grid;
+  gap: 10px;
+}
+
+label,
+.section-heading {
+  color: #344054;
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+textarea {
+  width: 100%;
+  min-height: 116px;
+  resize: vertical;
+  border: 1px solid #cfd5e1;
+  border-radius: 8px;
+  padding: 15px;
+  background: #ffffff;
+  color: #151820;
+  font-size: 17px;
+  line-height: 1.45;
+  outline: none;
+}
+
+textarea:focus {
+  border-color: #155eef;
+  box-shadow: 0 0 0 3px rgba(21, 94, 239, 0.13);
+}
+
+button {
+  min-height: 48px;
+  border: 0;
+  border-radius: 8px;
+  background: #151820;
+  color: #ffffff;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+.answer-section,
+.sources-section {
+  margin-top: 28px;
+}
+
+.section-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 10px;
+}
+
+.answer-meta {
+  color: #667085;
+  font-weight: 600;
+  text-transform: none;
+}
+
+.answer {
+  border-left: 4px solid #155eef;
+  padding: 3px 0 3px 16px;
+  font-size: 18px;
+  line-height: 1.62;
+  white-space: pre-wrap;
+}
+
+.sources {
+  border-top: 1px solid #dfe3eb;
+}
+
+.source {
+  padding: 16px 0;
+  border-bottom: 1px solid #dfe3eb;
+}
+
+.source-title {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.35;
+}
+
+.source-path {
+  margin: 5px 0 0;
+  color: #155eef;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.source-snippet {
+  margin: 9px 0 0;
+  color: #475467;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.error {
+  margin-top: 20px;
+  border-left: 4px solid #b42318;
+  padding: 4px 0 4px 14px;
+  color: #b42318;
+  line-height: 1.5;
+}
+
+@media (min-width: 640px) {
+  .shell {
+    padding-top: 52px;
+  }
+
+  .ask-form {
+    grid-template-columns: 1fr 112px;
+    align-items: end;
+  }
+
+  .ask-form label {
+    grid-column: 1 / -1;
+  }
+
+  textarea {
+    min-height: 104px;
+  }
+
+  button {
+    height: 104px;
+  }
+}

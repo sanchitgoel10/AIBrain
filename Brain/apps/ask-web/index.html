@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#f5f7fb">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="Ask My Brain">
+    <title>Ask My Brain</title>
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <header class="app-header">
+        <div class="mark" aria-hidden="true">A</div>
+        <div>
+          <h1>Ask My Brain</h1>
+          <p id="connectionStatus" class="connection" data-state="checking">Connecting to Mac</p>
+        </div>
+      </header>
+
+      <form id="askForm" class="ask-form">
+        <label for="question">Question</label>
+        <textarea
+          id="question"
+          name="question"
+          maxlength="1000"
+          rows="4"
+          placeholder="What do I know about..."
+          required
+        ></textarea>
+        <button id="askButton" type="submit">Ask</button>
+      </form>
+
+      <section id="answerSection" class="answer-section" hidden aria-live="polite">
+        <div class="section-heading">
+          <span>Answer</span>
+          <span id="answerMeta" class="answer-meta"></span>
+        </div>
+        <div id="answer" class="answer"></div>
+      </section>
+
+      <section id="sourcesSection" class="sources-section" hidden>
+        <div class="section-heading">
+          <span>Sources</span>
+          <span id="sourceCount" class="answer-meta"></span>
+        </div>
+        <div id="sources" class="sources"></div>
+      </section>
+
+      <div id="error" class="error" hidden role="alert"></div>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>
