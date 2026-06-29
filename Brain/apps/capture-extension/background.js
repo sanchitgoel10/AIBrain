@@ -694,9 +694,13 @@ async function pollJob(jobId, runId, signal) {
     const job = payload.job || {};
     await updateCapture(job.status, job.message || "AI Brain capture is running.", { bridgeJobId: jobId });
     if (job.status === "done") {
-      await updateCapture("done", `Saved ${job.path || "source note"} and linked ${job.ingest_path || "Wiki note"}.`, {
+      const transcriptProvider = job.transcript_provider ? ` Transcript: ${job.transcript_provider}.` : "";
+      await updateCapture("done", `Saved ${job.path || "source note"} and linked ${job.ingest_path || "Wiki note"}.${transcriptProvider}`, {
         path: job.path || "",
-        ingestPath: job.ingest_path || ""
+        ingestPath: job.ingest_path || "",
+        transcribeSource: job.transcribe_source || "",
+        transcriptProvider: job.transcript_provider || "",
+        captureWarning: job.capture_warning || ""
       });
       return;
     }

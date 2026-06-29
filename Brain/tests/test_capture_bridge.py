@@ -106,6 +106,8 @@ Reference: "https://www.youtube.com/watch?v=abc123&t=30s"
 
 # Useful Video
 
+Transcribe source: cached
+
 ## Transcript
 
 {transcript}
@@ -120,6 +122,42 @@ Reference: "https://www.youtube.com/watch?v=abc123&t=30s"
         self.assertEqual(source["quality"], "complete")
         self.assertGreater(source["content_chars"], 200)
         self.assertEqual(source["duplicate_count"], 1)
+        self.assertEqual(source["transcript_provider"], "UseTranscribe API")
+
+    def test_existing_source_reports_defuddle_transcript_provider(self) -> None:
+        raw = self.root / "Raw" / "Sources"
+        raw.mkdir(parents=True, exist_ok=True)
+        transcript = "\n".join(
+            [
+                "- [00:00] First transcript line with enough useful context.",
+                "- [00:10] Second transcript line with more useful context.",
+                "- [00:20] Third transcript line with still more useful context.",
+            ]
+        )
+        (raw / "video.md").write_text(
+            f"""---
+Title: "Fallback Video"
+Reference: "https://www.youtube.com/watch?v=def456"
+---
+
+# Fallback Video
+
+Transcribe source: defuddle-youtube-captions
+
+Capture warning: Primary Transcribe API failed; used Defuddle YouTube captions fallback.
+
+## Transcript
+
+{transcript}
+""",
+            encoding="utf-8",
+        )
+
+        source = capture_bridge.existing_source_for_url("https://www.youtube.com/watch?v=def456")
+
+        self.assertIsNotNone(source)
+        self.assertEqual(source["transcribe_source"], "defuddle-youtube-captions")
+        self.assertEqual(source["transcript_provider"], "Defuddle YouTube captions backup")
 
     def test_existing_small_transcript_is_marked_suspect(self) -> None:
         raw = self.root / "Raw" / "Sources"

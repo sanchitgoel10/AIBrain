@@ -146,6 +146,23 @@ def captured_section(body: str, heading: str) -> str:
     return match.group(1).strip() if match else ""
 
 
+def capture_field(body: str, label: str) -> str:
+    match = re.search(rf"(?im)^{re.escape(label)}:\s*(.*?)\s*$", body)
+    return match.group(1).strip() if match else ""
+
+
+def transcript_provider(transcribe_source: str, capture_warning: str) -> str:
+    source = transcribe_source.strip()
+    warning = capture_warning.lower()
+    if source == "defuddle-youtube-captions":
+        return "Defuddle YouTube captions backup"
+    if "direct youtube captions fallback" in warning:
+        return "Direct YouTube captions backup"
+    if source:
+        return "UseTranscribe API"
+    return ""
+
+
 def inspect_source_note(path: Path, requested_url: str) -> dict:
     frontmatter, body = auto_ingest.wiki_tool.read_frontmatter(path)
     reference = str(frontmatter.get("Reference", "")).strip()
@@ -167,9 +184,13 @@ def inspect_source_note(path: Path, requested_url: str) -> dict:
         timestamp_lines = len(re.findall(r"(?m)^-\s+\[[0-9:]+\]", captured_text))
         complete = content_chars >= 200 and timestamp_lines >= 2 and not has_failure_marker
         detail_label = "transcript characters"
+        transcribe_source = capture_field(body, "Transcribe source")
+        capture_warning = capture_field(body, "Capture warning")
     else:
         complete = content_chars >= 300 and not has_failure_marker
         detail_label = "article characters"
+        transcribe_source = ""
+        capture_warning = capture_field(body, "Capture warning")
     return {
         "_path": path,
         "path": path.relative_to(capture.ROOT).as_posix(),
@@ -180,6 +201,9 @@ def inspect_source_note(path: Path, requested_url: str) -> dict:
         "content_label": detail_label,
         "quality": "complete" if complete else "suspect",
         "quality_message": "Existing capture looks complete." if complete else "Existing capture may be incomplete.",
+        "transcribe_source": transcribe_source,
+        "transcript_provider": transcript_provider(transcribe_source, capture_warning) if youtube else "",
+        "capture_warning": capture_warning,
     }
 
 
@@ -417,6 +441,7 @@ def run_capture_job(job_id: str, payload: dict) -> None:
         set_job(job_id, status="error", ok=False, error=str(exc), message=str(exc))
         return
 
+    source_status = inspect_source_note(path, url)
     set_job(
         job_id,
         status="done",
@@ -425,6 +450,9 @@ def run_capture_job(job_id: str, payload: dict) -> None:
         path=path.relative_to(capture.ROOT).as_posix(),
         ingest_path=ingest_path.relative_to(capture.ROOT).as_posix(),
         url=url,
+        transcribe_source=source_status.get("transcribe_source", ""),
+        transcript_provider=source_status.get("transcript_provider", ""),
+        capture_warning=source_status.get("capture_warning", ""),
     )
 
 
