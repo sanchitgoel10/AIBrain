@@ -13,14 +13,57 @@ import brain_ask
 
 
 class FakeOllama:
+    model = "fake-model"
+
+    def __init__(self) -> None:
+        self.last_call = {}
+
     def generate_json(self, prompt: str) -> dict:
         if "Answer the question" in prompt:
+            self.last_call = {
+                "provider": "fake-llm",
+                "endpoint": "https://example.test/chat/completions",
+                "model": self.model,
+                "status": "success",
+                "duration_ms": 12,
+                "request": {
+                    "prompt_chars": len(prompt),
+                    "response_format": "json_object",
+                    "timeout_seconds": 1,
+                },
+                "response": {
+                    "http_status": 200,
+                    "content_chars": 92,
+                    "finish_reason": "stop",
+                },
+            }
             return {"answer": "The country was the Philippines, not Malaysia.", "source_ids": ["S1"], "confidence": "high"}
         return {}
 
 
 class BadJsonOllama:
+    model = "bad-model"
+
+    def __init__(self) -> None:
+        self.last_call = {}
+
     def generate_json(self, _prompt: str) -> dict:
+        self.last_call = {
+            "provider": "fake-llm",
+            "endpoint": "https://example.test/chat/completions",
+            "model": self.model,
+            "status": "bad_response",
+            "duration_ms": 7,
+            "request": {
+                "prompt_chars": len(_prompt),
+                "response_format": "json_object",
+                "timeout_seconds": 1,
+            },
+            "response": {
+                "http_status": 200,
+                "content_excerpt": "not json",
+            },
+        }
         raise brain_ask.OllamaBadResponse("bad json")
 
 
@@ -70,6 +113,11 @@ stablecoins into local pesos in the Philippines. This was not about Malaysia.
 
         self.assertIn("Philippines", result["answer"])
         self.assertNotEqual(result["answer"], brain_ask.NO_ANSWER)
+        self.assertEqual(result["diagnostics"]["answer_origin"], "llm")
+        self.assertEqual(result["diagnostics"]["llm"]["status"], "success")
+        self.assertEqual(result["diagnostics"]["llm"]["provider"], "fake-llm")
+        self.assertEqual(result["diagnostics"]["llm"]["request"]["evidence_count"], 2)
+        self.assertEqual(result["diagnostics"]["llm"]["response"]["http_status"], 200)
         paths = {source["path"] for source in result["sources"] + result["results"]}
         self.assertIn("Wiki/Concepts/stablecoin-payment-rails.md", paths)
 
@@ -102,6 +150,10 @@ image by indicating locations instead of only describing the scene in text.
         self.assertIn("Most relevant Brain passage", result["answer"])
         self.assertIn("Compiled claim", result["answer"])
         self.assertEqual(result["engine"], "sqlite-fts5")
+        self.assertEqual(result["diagnostics"]["answer_origin"], "sql_snippet")
+        self.assertIn("LLM returned an invalid answer", result["diagnostics"]["fallback_reason"])
+        self.assertEqual(result["diagnostics"]["llm"]["status"], "bad_response")
+        self.assertEqual(result["diagnostics"]["llm"]["response"]["content_excerpt"], "not json")
         self.assertEqual(result["results"][0]["path"], "Wiki/Concepts/test.md")
 
     def test_missing_hosted_config_does_not_try_local_model(self) -> None:
@@ -122,6 +174,8 @@ image by indicating locations instead of only describing the scene in text.
 
         self.assertEqual(result["engine"], "sqlite-fts5")
         self.assertIn("llm_not_configured", result["warnings"])
+        self.assertEqual(result["diagnostics"]["answer_origin"], "sql_snippet")
+        self.assertEqual(result["diagnostics"]["llm"]["status"], "not_configured")
         self.assertIn("Compiled claim", result["answer"])
         self.assertEqual(result["results"][0]["path"], "Wiki/Concepts/test.md")
 

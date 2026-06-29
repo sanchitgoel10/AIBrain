@@ -122,6 +122,7 @@ class OllamaClient:
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.timeout_seconds = timeout_seconds
+        self.last_call: dict[str, Any] = {}
 
     def generate_json(self, prompt: str) -> dict:
         response = self._generate(prompt, json_mode=True)
@@ -131,6 +132,19 @@ class OllamaClient:
         return parsed
 
     def _generate(self, prompt: str, *, json_mode: bool) -> str:
+        started = time.monotonic()
+        url = ollama_generate_url(self.base_url)
+        self.last_call = {
+            "provider": "ollama",
+            "endpoint": redact_url(url),
+            "model": self.model,
+            "status": "started",
+            "request": {
+                "prompt_chars": len(prompt),
+                "json_mode": json_mode,
+                "timeout_seconds": self.timeout_seconds,
+            },
+        }
         payload: dict[str, Any] = {
             "model": self.model,
             "prompt": prompt,
@@ -140,7 +154,6 @@ class OllamaClient:
         if json_mode:
             payload["format"] = "json"
         data = json.dumps(payload).encode("utf-8")
-        url = ollama_generate_url(self.base_url)
         request = urllib.request.Request(
             url,
             data=data,
@@ -150,15 +163,46 @@ class OllamaClient:
         try:
             with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
                 body = response.read().decode("utf-8", "replace")
+                self.last_call.update(
+                    {
+                        "status": "http_response",
+                        "duration_ms": elapsed_ms(started),
+                        "response": {
+                            "http_status": response.status,
+                            "body_chars": len(body),
+                        },
+                    }
+                )
         except (TimeoutError, urllib.error.URLError, OSError) as exc:
+            self.last_call.update(call_error_details(started, exc))
             raise OllamaUnavailable(str(exc)) from exc
         try:
             payload = json.loads(body)
         except json.JSONDecodeError as exc:
+            self.last_call.update(
+                {
+                    "status": "bad_response",
+                    "response": {
+                        **self.last_call.get("response", {}),
+                        "body_excerpt": safe_excerpt(body),
+                    },
+                }
+            )
             raise OllamaBadResponse("Ollama returned invalid JSON.") from exc
         text = str(payload.get("response") or payload.get("thinking") or "").strip()
         if not text:
+            self.last_call.update({"status": "bad_response", "response": self.last_call.get("response", {})})
             raise OllamaBadResponse("Ollama returned an empty response.")
+        self.last_call.update(
+            {
+                "status": "success",
+                "duration_ms": elapsed_ms(started),
+                "response": {
+                    **self.last_call.get("response", {}),
+                    "content_chars": len(text),
+                },
+            }
+        )
         return strip_thinking(text)
 
 
@@ -168,10 +212,35 @@ class OpenAICompatibleClient:
         self.api_key = api_key
         self.model = model
         self.timeout_seconds = timeout_seconds
+        self.last_call: dict[str, Any] = {}
 
     def generate_json(self, prompt: str) -> dict:
         if not self.base_url or not self.api_key or not self.model:
+            self.last_call = {
+                "provider": "openai-compatible",
+                "endpoint": redact_url(f"{self.base_url}/chat/completions" if self.base_url else ""),
+                "model": self.model,
+                "status": "not_configured",
+                "request": {
+                    "prompt_chars": len(prompt),
+                    "timeout_seconds": self.timeout_seconds,
+                },
+            }
             raise OllamaUnavailable("Hosted LLM is not configured.")
+        started = time.monotonic()
+        endpoint = f"{self.base_url}/chat/completions"
+        self.last_call = {
+            "provider": hosted_provider_name(self.base_url),
+            "endpoint": redact_url(endpoint),
+            "model": self.model,
+            "status": "started",
+            "request": {
+                "prompt_chars": len(prompt),
+                "response_format": "json_object",
+                "temperature": 0,
+                "timeout_seconds": self.timeout_seconds,
+            },
+        }
         payload = {
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
@@ -180,7 +249,7 @@ class OpenAICompatibleClient:
         }
         data = json.dumps(payload).encode("utf-8")
         request = urllib.request.Request(
-            f"{self.base_url}/chat/completions",
+            endpoint,
             data=data,
             headers={
                 "Authorization": f"Bearer {self.api_key}",
@@ -191,17 +260,59 @@ class OpenAICompatibleClient:
         try:
             with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
                 body = response.read().decode("utf-8", "replace")
+                self.last_call.update(
+                    {
+                        "status": "http_response",
+                        "duration_ms": elapsed_ms(started),
+                        "response": {
+                            "http_status": response.status,
+                            "body_chars": len(body),
+                        },
+                    }
+                )
         except (TimeoutError, urllib.error.URLError, OSError) as exc:
+            self.last_call.update(call_error_details(started, exc))
             raise OllamaUnavailable(str(exc)) from exc
         try:
             payload = json.loads(body)
             choices = payload.get("choices", [])
             content = choices[0].get("message", {}).get("content", "") if choices else ""
+            finish_reason = choices[0].get("finish_reason", "") if choices else ""
         except (AttributeError, IndexError, json.JSONDecodeError) as exc:
+            self.last_call.update(
+                {
+                    "status": "bad_response",
+                    "response": {
+                        **self.last_call.get("response", {}),
+                        "body_excerpt": safe_excerpt(body),
+                    },
+                }
+            )
             raise OllamaBadResponse("Hosted LLM returned invalid JSON.") from exc
         parsed = parse_json_object(str(content))
         if not isinstance(parsed, dict):
+            self.last_call.update(
+                {
+                    "status": "bad_response",
+                    "response": {
+                        **self.last_call.get("response", {}),
+                        "content_chars": len(str(content)),
+                        "content_excerpt": safe_excerpt(str(content)),
+                    },
+                }
+            )
             raise OllamaBadResponse("Hosted LLM did not return a JSON object.")
+        self.last_call.update(
+            {
+                "status": "success",
+                "duration_ms": elapsed_ms(started),
+                "response": {
+                    **self.last_call.get("response", {}),
+                    "content_chars": len(str(content)),
+                    "finish_reason": finish_reason,
+                },
+            }
+        )
         return parsed
 
 
@@ -258,38 +369,55 @@ class BrainAskEngine:
     def ask(self, query: str, *, limit: int = 5, use_llm: bool = True) -> dict:
         query = query.strip()
         warnings: list[str] = []
+        llm_diagnostics = llm_not_attempted_diagnostics(self.ollama, self.active_model())
         if not self.ollama and use_llm:
             warnings.append("llm_not_configured")
+            llm_diagnostics["status"] = "not_configured"
             use_llm = False
         if not query:
-            return self.no_answer(query, warnings, [])
+            return self.no_answer(query, warnings, [], llm_diagnostics=llm_diagnostics)
 
         query_plan: dict = {"queries": [query], "mode": "retrieval-first-answer-only"}
         candidates = self.search_many([query], limit=30)
         if not candidates:
-            return self.no_answer(query, warnings, [])
+            return self.no_answer(query, warnings, [], llm_diagnostics=llm_diagnostics)
 
         selected = candidates[: min(6, len(candidates))]
         confidence = "low"
+        retrieval_diagnostics = {
+            "engine": "sqlite-fts5",
+            "query_terms": query_terms(query),
+            "fts_query": fts_query_for(query),
+            "candidate_count": len(candidates),
+            "selected_count": len(selected),
+            "selected_source_ids": [item.get("id", "") for item in selected],
+        }
 
         answer = ""
         answer_source_ids: list[str] = []
+        answer_origin = "none"
         if use_llm:
+            llm_diagnostics = llm_attempt_diagnostics(self.ollama, self.active_model(), selected)
             try:
                 answer_payload = self.answer_from_evidence(query, selected)
+                llm_diagnostics = llm_result_diagnostics(self.ollama, answer_payload, selected)
                 answer = answer_text_from_payload(answer_payload)
                 answer_source_ids = clean_id_list(answer_payload.get("source_ids", []))
                 if answer and not answer_source_ids and selected:
                     answer_source_ids = [selected[0]["id"]]
                 confidence = str(answer_payload.get("confidence") or confidence or "low")
+                answer_origin = "llm"
             except OllamaUnavailable:
                 warnings.append("llm_unavailable")
+                llm_diagnostics = llm_exception_diagnostics(self.ollama, "unavailable", selected)
                 use_llm = False
             except OllamaBadResponse:
                 warnings.append("llm_bad_answer")
+                llm_diagnostics = llm_exception_diagnostics(self.ollama, "bad_response", selected)
                 use_llm = False
             except Exception:
                 warnings.append("llm_answer_failed")
+                llm_diagnostics = llm_exception_diagnostics(self.ollama, "answer_failed", selected)
                 use_llm = False
 
         if not answer:
@@ -297,12 +425,15 @@ class BrainAskEngine:
                 answer = deterministic_evidence_answer(selected)
                 if answer and selected:
                     answer_source_ids = [selected[0]["id"]]
+                    answer_origin = "sql_snippet"
             else:
                 answer = NO_ANSWER
                 warnings.append("low_confidence")
+                answer_origin = "none"
 
         if answer.strip().lower() == NO_ANSWER.lower():
             warnings.append("low_confidence")
+            answer_origin = "none"
 
         source_pool = selected
         if answer_source_ids:
@@ -321,9 +452,22 @@ class BrainAskEngine:
             "query": query,
             "query_plan": query_plan,
             "confidence": confidence,
+            "diagnostics": {
+                "answer_origin": answer_origin,
+                "fallback_reason": fallback_reason(warnings, answer_origin),
+                "retrieval": retrieval_diagnostics,
+                "llm": llm_diagnostics,
+            },
         }
 
-    def no_answer(self, query: str, warnings: list[str], results: list[dict]) -> dict:
+    def no_answer(
+        self,
+        query: str,
+        warnings: list[str],
+        results: list[dict],
+        *,
+        llm_diagnostics: dict[str, Any] | None = None,
+    ) -> dict:
         return {
             "answer": NO_ANSWER,
             "sources": [],
@@ -334,6 +478,19 @@ class BrainAskEngine:
             "query": query,
             "query_plan": {},
             "confidence": "low",
+            "diagnostics": {
+                "answer_origin": "none",
+                "fallback_reason": fallback_reason(warnings, "none"),
+                "retrieval": {
+                    "engine": "sqlite-fts5",
+                    "query_terms": query_terms(query),
+                    "fts_query": fts_query_for(query),
+                    "candidate_count": len(results),
+                    "selected_count": 0,
+                    "selected_source_ids": [],
+                },
+                "llm": llm_diagnostics or llm_not_attempted_diagnostics(self.ollama, self.active_model()),
+            },
         }
 
     def search_many(self, queries: list[str], *, limit: int) -> list[dict]:
@@ -654,6 +811,161 @@ def split_long_text(text: str) -> list[str]:
             break
         start = max(end - CHUNK_OVERLAP_CHARS, start + 1)
     return chunks
+
+
+def hosted_provider_name(base_url: str) -> str:
+    if "openrouter.ai" in base_url:
+        return "openrouter"
+    return "openai-compatible"
+
+
+def redact_url(url: str) -> str:
+    if not url:
+        return ""
+    return re.sub(r"([?&](?:key|token|api_key|access_token)=)[^&]+", r"\1<redacted>", url, flags=re.IGNORECASE)
+
+
+def safe_excerpt(text: str, max_chars: int = 500) -> str:
+    compact = re.sub(r"\s+", " ", str(text)).strip()
+    if len(compact) <= max_chars:
+        return compact
+    return compact[: max_chars - 3].rstrip() + "..."
+
+
+def elapsed_ms(started: float) -> int:
+    return int((time.monotonic() - started) * 1000)
+
+
+def call_error_details(started: float, exc: BaseException) -> dict[str, Any]:
+    response: dict[str, Any] = {}
+    status = "unavailable"
+    message = str(exc)
+    if isinstance(exc, urllib.error.HTTPError):
+        status = "http_error"
+        response["http_status"] = exc.code
+        try:
+            response["body_excerpt"] = safe_excerpt(exc.read().decode("utf-8", "replace"))
+        except Exception:
+            response["body_excerpt"] = ""
+    elif isinstance(exc, TimeoutError):
+        status = "timeout"
+    elif isinstance(exc, urllib.error.URLError) and isinstance(exc.reason, TimeoutError):
+        status = "timeout"
+        message = str(exc.reason)
+    return {
+        "status": status,
+        "duration_ms": elapsed_ms(started),
+        "error_type": type(exc).__name__,
+        "error_message": safe_excerpt(message),
+        "response": response,
+    }
+
+
+def llm_not_attempted_diagnostics(client: Any, model: str) -> dict[str, Any]:
+    return {
+        "attempted": False,
+        "provider": llm_provider(client),
+        "model": model,
+        "endpoint": llm_endpoint(client),
+        "status": "not_attempted",
+        "request": {},
+        "response": {},
+    }
+
+
+def llm_attempt_diagnostics(client: Any, model: str, selected: list[dict]) -> dict[str, Any]:
+    return {
+        "attempted": True,
+        "provider": llm_provider(client),
+        "model": model,
+        "endpoint": llm_endpoint(client),
+        "status": "started",
+        "request": {
+            "evidence_count": len(selected),
+            "evidence_source_ids": [item.get("id", "") for item in selected],
+        },
+        "response": {},
+    }
+
+
+def llm_result_diagnostics(client: Any, payload: dict, selected: list[dict]) -> dict[str, Any]:
+    call = dict(getattr(client, "last_call", {}) or {})
+    request = {
+        "evidence_count": len(selected),
+        "evidence_source_ids": [item.get("id", "") for item in selected],
+        **dict(call.get("request", {}) or {}),
+    }
+    return {
+        "attempted": True,
+        "provider": call.get("provider") or llm_provider(client),
+        "model": call.get("model") or getattr(client, "model", ""),
+        "endpoint": call.get("endpoint") or llm_endpoint(client),
+        "status": call.get("status") or "success",
+        "duration_ms": call.get("duration_ms"),
+        "request": request,
+        "response": {
+            **dict(call.get("response", {}) or {}),
+            "answer_chars": len(answer_text_from_payload(payload)),
+            "source_ids": clean_id_list(payload.get("source_ids", [])),
+            "confidence": str(payload.get("confidence") or ""),
+        },
+    }
+
+
+def llm_exception_diagnostics(client: Any, status: str, selected: list[dict]) -> dict[str, Any]:
+    call = dict(getattr(client, "last_call", {}) or {})
+    request = {
+        "evidence_count": len(selected),
+        "evidence_source_ids": [item.get("id", "") for item in selected],
+        **dict(call.get("request", {}) or {}),
+    }
+    return {
+        "attempted": True,
+        "provider": call.get("provider") or llm_provider(client),
+        "model": call.get("model") or getattr(client, "model", ""),
+        "endpoint": call.get("endpoint") or llm_endpoint(client),
+        "status": call.get("status") or status,
+        "duration_ms": call.get("duration_ms"),
+        "error_type": call.get("error_type", ""),
+        "error_message": call.get("error_message", ""),
+        "request": request,
+        "response": dict(call.get("response", {}) or {}),
+    }
+
+
+def llm_provider(client: Any) -> str:
+    if isinstance(client, OpenAICompatibleClient):
+        return hosted_provider_name(client.base_url)
+    if isinstance(client, OllamaClient):
+        return "ollama"
+    return ""
+
+
+def llm_endpoint(client: Any) -> str:
+    if isinstance(client, OpenAICompatibleClient):
+        return redact_url(f"{client.base_url}/chat/completions")
+    if isinstance(client, OllamaClient):
+        return redact_url(ollama_generate_url(client.base_url))
+    return ""
+
+
+def fallback_reason(warnings: list[str], answer_origin: str) -> str:
+    warning_set = set(warnings)
+    if answer_origin == "llm":
+        return ""
+    if answer_origin == "sql_snippet":
+        if "llm_not_configured" in warning_set:
+            return "LLM was not configured; answer came from SQLite snippets."
+        if "llm_unavailable" in warning_set:
+            return "LLM call was unavailable; answer came from SQLite snippets."
+        if "llm_bad_answer" in warning_set:
+            return "LLM returned an invalid answer; answer came from SQLite snippets."
+        if "llm_answer_failed" in warning_set:
+            return "LLM answer synthesis failed; answer came from SQLite snippets."
+        return "Answer came from SQLite snippets."
+    if "low_confidence" in warning_set:
+        return "No strong Brain evidence was found."
+    return ""
 
 
 def query_terms(text: str) -> list[str]:

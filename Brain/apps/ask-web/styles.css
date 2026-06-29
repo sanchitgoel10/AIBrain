@@ -116,6 +116,7 @@ button:disabled {
 }
 
 .answer-section,
+.diagnostics-section,
 .sources-section {
   margin-top: 28px;
 }
@@ -139,6 +140,65 @@ button:disabled {
   font-size: 18px;
   line-height: 1.62;
   white-space: pre-wrap;
+}
+
+.diagnostics {
+  border: 1px solid #d0d7e2;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.diagnostics summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 13px 14px;
+  color: #344054;
+  font-size: 13px;
+  font-weight: 750;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.diagnostics-body {
+  border-top: 1px solid #e3e8ef;
+  padding: 12px 14px 14px;
+}
+
+.diagnostic-grid {
+  display: grid;
+  gap: 0;
+  margin: 0;
+}
+
+.diagnostic-row {
+  display: grid;
+  grid-template-columns: minmax(112px, 0.35fr) 1fr;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid #edf1f6;
+}
+
+.diagnostic-row:last-child {
+  border-bottom: 0;
+}
+
+.diagnostic-row dt,
+.diagnostic-row dd {
+  margin: 0;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.diagnostic-row dt {
+  color: #667085;
+  font-weight: 700;
+}
+
+.diagnostic-row dd {
+  color: #263042;
+  overflow-wrap: anywhere;
 }
 
 .sources {

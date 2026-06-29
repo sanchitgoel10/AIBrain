@@ -286,6 +286,58 @@ input[type="search"] {
   white-space: pre-wrap;
 }
 
+.ask-diagnostics {
+  margin-top: 10px;
+  border-top: 1px solid #e2e5ec;
+  padding-top: 8px;
+}
+
+.ask-diagnostics summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: #697386;
+  font-size: 10px;
+  font-weight: 780;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.ask-diagnostics summary span {
+  max-width: 160px;
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ask-diagnostics-body {
+  display: grid;
+  gap: 5px;
+  margin-top: 8px;
+}
+
+.ask-diagnostic-row {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  gap: 8px;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.ask-diagnostic-row span {
+  color: #697386;
+  font-weight: 700;
+}
+
+.ask-diagnostic-row strong {
+  min-width: 0;
+  color: #20242d;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
 .result {
   border: 1px solid #e2e5ec;
   border-radius: 8px;

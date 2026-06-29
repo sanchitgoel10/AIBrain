@@ -69,6 +69,57 @@ function renderAskResults(results) {
   `).join("");
 }
 
+function askOriginLabel(origin) {
+  if (origin === "llm") return "Answered by LLM";
+  if (origin === "sql_snippet") return "Answered from SQL snippets";
+  return "No grounded answer";
+}
+
+function formatDiagnosticValue(value) {
+  if (value === undefined || value === null || value === "") return "";
+  if (Array.isArray(value)) return value.join(", ");
+  return String(value);
+}
+
+function diagnosticLine(label, value) {
+  const formatted = formatDiagnosticValue(value);
+  if (!formatted) return "";
+  return `<div class="ask-diagnostic-row"><span>${escapeHtml(label)}</span><strong>${escapeHtml(formatted)}</strong></div>`;
+}
+
+function renderAskDiagnostics(current) {
+  const diagnostics = current.diagnostics || {};
+  const llm = diagnostics.llm || {};
+  const retrieval = diagnostics.retrieval || {};
+  const origin = diagnostics.answer_origin || "";
+  const warnings = current.warnings || [];
+  if (!origin && !warnings.length && !llm.status) return "";
+  const rows = [
+    diagnosticLine("Source", askOriginLabel(origin)),
+    diagnosticLine("Fallback", diagnostics.fallback_reason),
+    diagnosticLine("Warnings", warnings),
+    diagnosticLine("Retrieval", retrieval.engine || current.engine),
+    diagnosticLine("Terms", retrieval.query_terms),
+    diagnosticLine("LLM", llm.attempted === true ? "attempted" : "not attempted"),
+    diagnosticLine("Provider", llm.provider),
+    diagnosticLine("Model", llm.model || current.model),
+    diagnosticLine("Endpoint", llm.endpoint),
+    diagnosticLine("Status", String(llm.status || "").replaceAll("_", " ")),
+    diagnosticLine("HTTP", llm.response?.http_status),
+    diagnosticLine("Duration", llm.duration_ms !== undefined ? `${llm.duration_ms} ms` : ""),
+    diagnosticLine("Prompt", llm.request?.prompt_chars ? `${llm.request.prompt_chars} chars` : ""),
+    diagnosticLine("Evidence", llm.request?.evidence_count),
+    diagnosticLine("Error", llm.error_message),
+    diagnosticLine("Response", llm.response?.body_excerpt || llm.response?.content_excerpt)
+  ].join("");
+  return `
+    <details class="ask-diagnostics" ${origin !== "llm" || warnings.length ? "open" : ""}>
+      <summary>Diagnostics <span>${escapeHtml(askOriginLabel(origin))}</span></summary>
+      <div class="ask-diagnostics-body">${rows}</div>
+    </details>
+  `;
+}
+
 function renderAsk(ask) {
   const current = ask || {};
   els.askSubmit.disabled = Boolean(current.running);
@@ -92,6 +143,7 @@ function renderAsk(ask) {
     els.askAnswer.innerHTML = `
       <div class="answer-label">Answer</div>
       <div class="answer-text">${escapeHtml(current.answer)}</div>
+      ${renderAskDiagnostics(current)}
     `;
   } else {
     els.askAnswer.classList.add("hidden");

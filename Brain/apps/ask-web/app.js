@@ -4,6 +4,10 @@ const els = {
   answerSection: document.getElementById("answerSection"),
   askButton: document.getElementById("askButton"),
   connectionStatus: document.getElementById("connectionStatus"),
+  diagnosticsBody: document.getElementById("diagnosticsBody"),
+  diagnosticsDetails: document.getElementById("diagnosticsDetails"),
+  diagnosticsSection: document.getElementById("diagnosticsSection"),
+  diagnosticsSummary: document.getElementById("diagnosticsSummary"),
   error: document.getElementById("error"),
   form: document.getElementById("askForm"),
   question: document.getElementById("question"),
@@ -63,10 +67,79 @@ function renderSources(items) {
   els.sourcesSection.hidden = items.length === 0;
 }
 
+function originLabel(origin) {
+  if (origin === "llm") return "Answered by LLM";
+  if (origin === "sql_snippet") return "Answered from SQL snippets";
+  return "No grounded answer";
+}
+
+function statusLabel(status) {
+  return String(status || "unknown").replaceAll("_", " ");
+}
+
+function addDiagnosticRow(parent, label, value) {
+  if (value === undefined || value === null || value === "") return;
+  const row = document.createElement("div");
+  row.className = "diagnostic-row";
+
+  const key = document.createElement("dt");
+  key.textContent = label;
+  row.appendChild(key);
+
+  const val = document.createElement("dd");
+  val.textContent = Array.isArray(value) ? value.join(", ") : String(value);
+  row.appendChild(val);
+
+  parent.appendChild(row);
+}
+
+function renderDiagnostics(payload) {
+  const diagnostics = payload.diagnostics || {};
+  const llm = diagnostics.llm || {};
+  const retrieval = diagnostics.retrieval || {};
+  const origin = diagnostics.answer_origin || "";
+  const warnings = payload.warnings || [];
+
+  els.diagnosticsBody.replaceChildren();
+  els.diagnosticsSummary.textContent = originLabel(origin);
+  els.answerMeta.textContent = `${originLabel(origin)}${payload.model ? ` · ${payload.model}` : ""}`;
+
+  const body = document.createElement("dl");
+  body.className = "diagnostic-grid";
+
+  addDiagnosticRow(body, "Answer source", originLabel(origin));
+  addDiagnosticRow(body, "Fallback reason", diagnostics.fallback_reason);
+  addDiagnosticRow(body, "Warnings", warnings);
+  addDiagnosticRow(body, "Retrieval engine", retrieval.engine || payload.engine);
+  addDiagnosticRow(body, "Query terms", retrieval.query_terms);
+  addDiagnosticRow(body, "FTS query", retrieval.fts_query);
+  addDiagnosticRow(body, "Candidates", retrieval.candidate_count);
+  addDiagnosticRow(body, "Selected evidence", retrieval.selected_source_ids);
+  addDiagnosticRow(body, "LLM attempted", llm.attempted === true ? "yes" : "no");
+  addDiagnosticRow(body, "LLM provider", llm.provider);
+  addDiagnosticRow(body, "LLM model", llm.model || payload.model);
+  addDiagnosticRow(body, "LLM endpoint", llm.endpoint);
+  addDiagnosticRow(body, "LLM status", statusLabel(llm.status));
+  addDiagnosticRow(body, "Duration", llm.duration_ms !== undefined ? `${llm.duration_ms} ms` : "");
+  addDiagnosticRow(body, "HTTP status", llm.response?.http_status);
+  addDiagnosticRow(body, "Prompt size", llm.request?.prompt_chars ? `${llm.request.prompt_chars} chars` : "");
+  addDiagnosticRow(body, "Evidence sent", llm.request?.evidence_count);
+  addDiagnosticRow(body, "Response size", llm.response?.content_chars ? `${llm.response.content_chars} chars` : "");
+  addDiagnosticRow(body, "LLM confidence", llm.response?.confidence || payload.confidence);
+  addDiagnosticRow(body, "LLM source ids", llm.response?.source_ids);
+  addDiagnosticRow(body, "Error type", llm.error_type);
+  addDiagnosticRow(body, "Error message", llm.error_message);
+  addDiagnosticRow(body, "Response excerpt", llm.response?.body_excerpt || llm.response?.content_excerpt);
+
+  els.diagnosticsBody.appendChild(body);
+  els.diagnosticsSection.hidden = false;
+  els.diagnosticsDetails.open = origin !== "llm" || warnings.length > 0;
+}
+
 function renderAnswer(payload) {
   els.answer.textContent = payload.answer || "I couldn't find this in the Brain.";
-  els.answerMeta.textContent = payload.model || payload.engine || "";
   els.answerSection.hidden = false;
+  renderDiagnostics(payload);
   renderSources(uniqueSources(payload));
 }
 
@@ -89,6 +162,7 @@ async function ask(event) {
   els.askButton.disabled = true;
   els.askButton.textContent = "Thinking...";
   els.answerSection.hidden = true;
+  els.diagnosticsSection.hidden = true;
   els.sourcesSection.hidden = true;
 
   const controller = new AbortController();

@@ -14,7 +14,7 @@ const STORAGE_KEY = "aiBrainUiState";
 let uiState = {
   tab: null,
   capture: { status: "idle", message: "Ready.", running: false },
-  ask: { status: "idle", query: "", answer: "", results: [], running: false }
+  ask: { status: "idle", query: "", answer: "", results: [], diagnostics: null, running: false }
 };
 let captureRunId = 0;
 let captureAbortController = null;
@@ -203,6 +203,46 @@ function articleScrollSnapshot() {
     return !element || element === window || element === document || element === document.body || element === document.documentElement || element === document.scrollingElement;
   }
 
+  function prepareCaptureViewport() {
+    const markerPattern = /(video|player|media|modal|popup|overlay|floating|sticky|miniplayer)/i;
+    const candidates = document.querySelectorAll("video, iframe, [class*='video' i], [class*='player' i], [class*='media' i], [class*='modal' i], [class*='popup' i], [class*='overlay' i], [class*='floating' i], [class*='sticky' i], [id*='video' i], [id*='player' i]");
+    for (const node of candidates) {
+      if (node.dataset?.aibrainCaptureHidden === "1") continue;
+      for (const video of node.matches?.("video") ? [node] : node.querySelectorAll?.("video") || []) {
+        try {
+          video.pause();
+        } catch (_error) {
+          // Best-effort only; some embedded players block script control.
+        }
+      }
+      const rect = node.getBoundingClientRect?.();
+      if (!rect || rect.width < 160 || rect.height < 100 || rect.bottom < 0 || rect.top > window.innerHeight) continue;
+      const style = window.getComputedStyle(node);
+      const marker = `${node.id || ""} ${node.className || ""} ${node.getAttribute?.("aria-label") || ""}`;
+      const isMediaElement = /^(video|iframe)$/i.test(node.tagName || "");
+      const isFloating = isMediaElement || style.position === "fixed" || style.position === "sticky" || markerPattern.test(marker);
+      const textLength = String(node.innerText || "").trim().length;
+      if (!isFloating || textLength > 400) continue;
+      node.dataset.aibrainCaptureHidden = "1";
+      node.style.setProperty("visibility", "hidden", "important");
+      node.style.setProperty("pointer-events", "none", "important");
+    }
+  }
+
+  function isUsableScrollCandidate(element) {
+    if (isWindowRoot(element)) return true;
+    const rect = element.getBoundingClientRect();
+    if (!rect || rect.height < 180 || rect.width < 280) return false;
+    if (rect.bottom < window.innerHeight * 0.15 || rect.top > window.innerHeight * 0.95) return false;
+    const style = window.getComputedStyle(element);
+    if (style.position === "fixed" || style.position === "sticky") return false;
+    const marker = `${element.id || ""} ${element.className || ""} ${element.getAttribute?.("aria-label") || ""}`;
+    if (/(modal|popup|overlay|player|miniplayer|carousel|slider)/i.test(marker)) return false;
+    const scrollable = Math.max((element.scrollHeight || 0) - (element.clientHeight || 0), 0);
+    const overflowY = `${style.overflowY} ${style.overflow}`;
+    return scrollable > 120 && (/(auto|scroll|overlay)/.test(overflowY) || scrollable > 500);
+  }
+
   function candidateInfo(element, label) {
     const usesWindow = isWindowRoot(element);
     const root = usesWindow ? document.scrollingElement || document.documentElement || document.body : element;
@@ -216,11 +256,13 @@ function articleScrollSnapshot() {
       y,
       maxY: Math.max(height - viewport, 0),
       viewport,
-      scrollMode: usesWindow ? "window" : "element"
+      scrollMode: usesWindow ? "window" : "element",
+      priority: usesWindow ? 100 : /^(article|main)$/i.test(element?.tagName || "") ? 80 : 0
     };
   }
 
   function scrollCandidates() {
+    prepareCaptureViewport();
     const root = document.scrollingElement || document.documentElement || document.body;
     const pointed = document.elementFromPoint(Math.floor(window.innerWidth / 2), Math.floor(window.innerHeight * 0.65));
     const ancestors = [];
@@ -240,15 +282,14 @@ function articleScrollSnapshot() {
         const key = element === window ? "window" : element;
         if (seen.has(key)) return false;
         seen.add(key);
-        if (isWindowRoot(element)) return true;
-        const rect = element.getBoundingClientRect();
-        const scrollable = Math.max((element.scrollHeight || 0) - (element.clientHeight || 0), 0);
-        const style = window.getComputedStyle(element);
-        const overflowY = `${style.overflowY} ${style.overflow}`;
-        return rect.height > 180 && rect.width > 280 && scrollable > 120 && (/(auto|scroll|overlay)/.test(overflowY) || scrollable > 500);
+        return isUsableScrollCandidate(element);
       })
       .map((element, index) => ({ element, label: element === window ? "window" : `${element.tagName?.toLowerCase() || "node"}-${index}` }))
-      .sort((a, b) => candidateInfo(b.element, b.label).maxY - candidateInfo(a.element, a.label).maxY);
+      .sort((a, b) => {
+        const left = candidateInfo(a.element, a.label);
+        const right = candidateInfo(b.element, b.label);
+        return right.priority - left.priority || right.maxY - left.maxY;
+      });
   }
 
   function articleEndVisible() {
@@ -291,6 +332,46 @@ async function advanceArticleScroll(step) {
     return !element || element === window || element === document || element === document.body || element === document.documentElement || element === document.scrollingElement;
   }
 
+  function prepareCaptureViewport() {
+    const markerPattern = /(video|player|media|modal|popup|overlay|floating|sticky|miniplayer)/i;
+    const candidates = document.querySelectorAll("video, iframe, [class*='video' i], [class*='player' i], [class*='media' i], [class*='modal' i], [class*='popup' i], [class*='overlay' i], [class*='floating' i], [class*='sticky' i], [id*='video' i], [id*='player' i]");
+    for (const node of candidates) {
+      if (node.dataset?.aibrainCaptureHidden === "1") continue;
+      for (const video of node.matches?.("video") ? [node] : node.querySelectorAll?.("video") || []) {
+        try {
+          video.pause();
+        } catch (_error) {
+          // Best-effort only; some embedded players block script control.
+        }
+      }
+      const rect = node.getBoundingClientRect?.();
+      if (!rect || rect.width < 160 || rect.height < 100 || rect.bottom < 0 || rect.top > window.innerHeight) continue;
+      const style = window.getComputedStyle(node);
+      const marker = `${node.id || ""} ${node.className || ""} ${node.getAttribute?.("aria-label") || ""}`;
+      const isMediaElement = /^(video|iframe)$/i.test(node.tagName || "");
+      const isFloating = isMediaElement || style.position === "fixed" || style.position === "sticky" || markerPattern.test(marker);
+      const textLength = String(node.innerText || "").trim().length;
+      if (!isFloating || textLength > 400) continue;
+      node.dataset.aibrainCaptureHidden = "1";
+      node.style.setProperty("visibility", "hidden", "important");
+      node.style.setProperty("pointer-events", "none", "important");
+    }
+  }
+
+  function isUsableScrollCandidate(element) {
+    if (isWindowRoot(element)) return true;
+    const rect = element.getBoundingClientRect();
+    if (!rect || rect.height < 180 || rect.width < 280) return false;
+    if (rect.bottom < window.innerHeight * 0.15 || rect.top > window.innerHeight * 0.95) return false;
+    const style = window.getComputedStyle(element);
+    if (style.position === "fixed" || style.position === "sticky") return false;
+    const marker = `${element.id || ""} ${element.className || ""} ${element.getAttribute?.("aria-label") || ""}`;
+    if (/(modal|popup|overlay|player|miniplayer|carousel|slider)/i.test(marker)) return false;
+    const scrollable = Math.max((element.scrollHeight || 0) - (element.clientHeight || 0), 0);
+    const overflowY = `${style.overflowY} ${style.overflow}`;
+    return scrollable > 120 && (/(auto|scroll|overlay)/.test(overflowY) || scrollable > 500);
+  }
+
   function candidateInfo(element, label) {
     const usesWindow = isWindowRoot(element);
     const root = usesWindow ? document.scrollingElement || document.documentElement || document.body : element;
@@ -305,11 +386,13 @@ async function advanceArticleScroll(step) {
       y,
       maxY: Math.max(height - viewport, 0),
       viewport,
-      scrollMode: usesWindow ? "window" : "element"
+      scrollMode: usesWindow ? "window" : "element",
+      priority: usesWindow ? 100 : /^(article|main)$/i.test(element?.tagName || "") ? 80 : 0
     };
   }
 
   function scrollCandidates() {
+    prepareCaptureViewport();
     const root = document.scrollingElement || document.documentElement || document.body;
     const pointed = document.elementFromPoint(Math.floor(window.innerWidth / 2), Math.floor(window.innerHeight * 0.65));
     const ancestors = [];
@@ -329,15 +412,14 @@ async function advanceArticleScroll(step) {
         const key = element === window ? "window" : element;
         if (seen.has(key)) return false;
         seen.add(key);
-        if (isWindowRoot(element)) return true;
-        const rect = element.getBoundingClientRect();
-        const scrollable = Math.max((element.scrollHeight || 0) - (element.clientHeight || 0), 0);
-        const style = window.getComputedStyle(element);
-        const overflowY = `${style.overflowY} ${style.overflow}`;
-        return rect.height > 180 && rect.width > 280 && scrollable > 120 && (/(auto|scroll|overlay)/.test(overflowY) || scrollable > 500);
+        return isUsableScrollCandidate(element);
       })
       .map((element, index) => ({ element, label: element === window ? "window" : `${element.tagName?.toLowerCase() || "node"}-${index}` }))
-      .sort((a, b) => candidateInfo(b.element, b.label).maxY - candidateInfo(a.element, a.label).maxY);
+      .sort((a, b) => {
+        const left = candidateInfo(a.element, a.label);
+        const right = candidateInfo(b.element, b.label);
+        return right.priority - left.priority || right.maxY - left.maxY;
+      });
   }
 
   function scrollElement(element, amount) {
@@ -382,6 +464,7 @@ async function advanceArticleScroll(step) {
     target.dispatchEvent(new WheelEvent("wheel", { deltaY: amount, bubbles: true, cancelable: true, view: window }));
   }
 
+  prepareCaptureViewport();
   const candidates = scrollCandidates();
   for (const candidate of candidates) {
     const before = candidateInfo(candidate.element, candidate.label);
@@ -418,6 +501,11 @@ async function advanceArticleScroll(step) {
 }
 
 function restoreArticleScroll(original) {
+  for (const node of document.querySelectorAll("[data-aibrain-capture-hidden='1']")) {
+    node.style.removeProperty("visibility");
+    node.style.removeProperty("pointer-events");
+    delete node.dataset.aibrainCaptureHidden;
+  }
   const root = document.scrollingElement || document.documentElement || document.body;
   if (root) root.scrollTop = original?.y || 0;
   window.scrollTo(0, original?.y || 0);
@@ -757,7 +845,7 @@ async function dismissDuplicate() {
 
 async function askBrain(query) {
   if (!query || uiState.ask?.running) return;
-  await updateAsk({ status: "searching", query, answer: "", results: [], running: true, error: "" });
+  await updateAsk({ status: "searching", query, answer: "", results: [], diagnostics: null, running: true, error: "" });
   try {
     const response = await fetch(`${ASK_URL}?query=${encodeURIComponent(query)}`);
     const payload = await response.json().catch(() => ({}));
@@ -767,11 +855,16 @@ async function askBrain(query) {
       query,
       answer: payload.answer || "",
       results: payload.sources || payload.results || [],
+      diagnostics: payload.diagnostics || null,
+      warnings: payload.warnings || [],
+      engine: payload.engine || "",
+      model: payload.model || "",
+      confidence: payload.confidence || "",
       running: false,
       error: ""
     });
   } catch (error) {
-    await updateAsk({ status: "error", query, answer: "", results: [], running: false, error: error.message });
+    await updateAsk({ status: "error", query, answer: "", results: [], diagnostics: null, running: false, error: error.message });
   }
 }
 
