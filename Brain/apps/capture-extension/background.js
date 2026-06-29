@@ -4,8 +4,9 @@ const ASK_URL = "http://127.0.0.1:8765/ask";
 const OPEN_SOURCE_URL = "http://127.0.0.1:8765/open-source";
 const CANCEL_URL = "http://127.0.0.1:8765/cancel";
 const SOURCE_STATUS_URL = "http://127.0.0.1:8765/source-status";
-const ARTICLE_CAPTURE_TIMEOUT_MS = 120000;
-const ARTICLE_CAPTURE_MAX_BYTES = 64 * 1024 * 1024;
+const ARTICLE_CAPTURE_TIMEOUT_MS = 300000;
+const ARTICLE_CAPTURE_MAX_BYTES = 220 * 1024 * 1024;
+const ARTICLE_SCREENSHOT_OPTIONS = { format: "jpeg", quality: 78 };
 const SCREENSHOT_PRIMARY_HOSTS = ["the-ken.com", "ft.com"];
 const DIRECT_TEXT_MIN_CHARS = 1800;
 const DIRECT_TEXT_GOOD_CHARS = 4500;
@@ -563,7 +564,7 @@ async function captureArticleScreenshots(tab, runId) {
       state = snapshotResults?.[0]?.result || state;
       await updateCapture("capturing", `Capturing article screenshot ${index + 1} for OCR.`);
       assertCaptureActive(runId);
-      const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" });
+      const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, ARTICLE_SCREENSHOT_OPTIONS);
       const previous = screenshots[screenshots.length - 1];
       if (previous?.dataUrl === dataUrl) {
         stopReason = "duplicate viewport";

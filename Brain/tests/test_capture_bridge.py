@@ -185,6 +185,22 @@ Transcript could not be captured automatically.
         self.assertEqual(text, "article text")
         self.assertEqual(len(observed["args"][2:]), 35)
 
+    def test_ocr_preserves_jpeg_screenshot_extension(self) -> None:
+        original_run = capture_bridge.subprocess.run
+        observed = {}
+
+        def fake_run(args, **_kwargs):
+            observed["args"] = args
+            return SimpleNamespace(returncode=0, stdout="article text", stderr="")
+
+        capture_bridge.subprocess.run = fake_run
+        self.addCleanup(setattr, capture_bridge.subprocess, "run", original_run)
+
+        text = capture_bridge.ocr_screenshots([{"dataUrl": "data:image/jpeg;base64,AA=="}])
+
+        self.assertEqual(text, "article text")
+        self.assertTrue(str(observed["args"][2]).endswith(".jpg"))
+
     def test_forced_ocr_replaces_stale_dom_text(self) -> None:
         original_ocr = capture_bridge.ocr_screenshots
         capture_bridge.ocr_screenshots = lambda screenshots: (

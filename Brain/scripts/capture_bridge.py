@@ -274,6 +274,15 @@ def data_url_bytes(data_url: str) -> bytes:
     return base64.b64decode(encoded)
 
 
+def data_url_extension(data_url: str) -> str:
+    header = data_url.split(",", 1)[0].lower()
+    if "image/jpeg" in header or "image/jpg" in header:
+        return ".jpg"
+    if "image/png" in header:
+        return ".png"
+    return ".img"
+
+
 def ocr_screenshots(screenshots: list[dict]) -> str:
     if not screenshots:
         return ""
@@ -284,7 +293,7 @@ def ocr_screenshots(screenshots: list[dict]) -> str:
             data_url = str(screenshot.get("dataUrl", ""))
             if not data_url:
                 continue
-            path = Path(tmp_dir) / f"capture-{index:02d}.png"
+            path = Path(tmp_dir) / f"capture-{index:02d}{data_url_extension(data_url)}"
             path.write_bytes(data_url_bytes(data_url))
             paths.append(str(path))
         if not paths:
